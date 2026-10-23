@@ -9,7 +9,6 @@ import {
   POLICY_STATUSES,
   POLICY_TYPES,
   PRIORITIES,
-  QUOTE_STATUSES,
   RECEIPT_STATUSES,
   TASK_STATUSES,
   TASK_TYPES,
@@ -260,18 +259,6 @@ export const claimSchema = z.object({
   notes: optionalText,
 });
 
-export const quoteSchema = z.object({
-  clientId: z.string().min(1, "Selecciona un cliente."),
-  insurerId: z.string().optional().or(z.literal("")),
-  policyType: z.enum(POLICY_TYPES),
-  status: z.enum(QUOTE_STATUSES),
-  requestedDate: requiredDate,
-  sentDate: optionalDate,
-  validUntil: optionalDate,
-  quotedAmount: z.coerce.number().optional(),
-  notes: optionalText,
-});
-
 export type ClientFormValues = z.infer<typeof clientSchema>;
 export type PolicyFormValues = z.infer<typeof policySchema>;
 export type ReceiptFormValues = z.infer<typeof receiptSchema>;
@@ -280,4 +267,3 @@ export type EndorsementFormValues = z.infer<typeof endorsementSchema>;
 export type WorkItemFormValues = z.infer<typeof workItemSchema>;
 export type InsurerFormValues = z.infer<typeof insurerSchema>;
 export type ClaimFormValues = z.infer<typeof claimSchema>;
-export type QuoteFormValues = z.infer<typeof quoteSchema>;

@@ -17,7 +17,7 @@ export type SearchMatch = {
 
 export type GlobalSearchResult = {
   id: string;
-  type: "client" | "policy" | "receipt" | "workItem" | "claim" | "quote" | "insurer" | "document";
+  type: "client" | "policy" | "receipt" | "workItem" | "claim" | "insurer" | "document";
   title: string;
   subtitle?: string;
   details?: string[];
@@ -99,7 +99,6 @@ type SearchTable =
   | "Receipt"
   | "WorkItem"
   | "Claim"
-  | "Quote"
   | "Insurer"
   | "Document";
 
@@ -243,9 +242,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
   const scopedClaimWhere = portfolioOwnerId
     ? Prisma.sql`EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Claim"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})`
     : undefined;
-  const scopedQuoteWhere = portfolioOwnerId
-    ? Prisma.sql`EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Quote"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})`
-    : undefined;
   const scopedInsurerWhere = portfolioOwnerId
     ? Prisma.sql`EXISTS (
       SELECT 1
@@ -266,7 +262,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
         OR ("WorkItem"."clientId" IS NULL AND "WorkItem"."assignedToId" = ${portfolioOwnerId})
       ))
       OR EXISTS (SELECT 1 FROM "Claim" WHERE "Claim"."id" = "Document"."claimId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Claim"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
-      OR EXISTS (SELECT 1 FROM "Quote" WHERE "Quote"."id" = "Document"."quoteId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Quote"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
       OR (
         "Document"."createdById" = ${portfolioOwnerId}
         AND "Document"."clientId" IS NULL
@@ -310,7 +305,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     clientName: string | null;
   };
   type ClaimRow = RowWithId & { folio: string; claimType: string; notes: string | null; clientName: string | null };
-  type QuoteRow = RowWithId & { policyType: string; notes: string | null; clientName: string | null };
   type InsurerRow = RowWithId & { name: string; contactName: string | null; notes: string | null };
   type DocumentRow = RowWithId & {
     fileName: string;
@@ -325,7 +319,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     parentLabel: string | null;
   };
 
-  const [clients, policies, receipts, workItems, claims, quotes, insurers, documents] = await Promise.all([
+  const [clients, policies, receipts, workItems, claims, insurers, documents] = await Promise.all([
     rawSearch<ClientRow>(
       "Client",
       ["id", "fullName", "status", "email", "phone", "rfc", "address", "notes", "updatedAt"],
@@ -438,18 +432,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
       withOrganizationScope("Claim", scopedClaimWhere, organizationId),
       db,
     ),
-    rawSearch<QuoteRow>(
-      "Quote",
-      ["id", "policyType", "notes", "updatedAt"],
-      ["id", "notes"],
-      needle,
-      5,
-      undefined,
-      Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Quote"."clientId") AS "clientName"`,
-      undefined,
-      withOrganizationScope("Quote", scopedQuoteWhere, organizationId),
-      db,
-    ),
     rawSearch<InsurerRow>(
       "Insurer",
       ["id", "name", "contactName", "notes", "updatedAt"],
@@ -548,19 +530,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
       subtitle: `${cl.clientName ?? "Sin cliente"} · ${cl.claimType}`,
       details: cleanStrings([cl.claimType, cl.notes]),
       href: `/claims/${cl.id}`,
-      match,
-    });
-  }
-
-  for (const q of quotes) {
-    const match = pickMatch(q, ["id", "notes"], needle);
-    results.push({
-      id: q.id,
-      type: "quote",
-      title: q.id.slice(0, 8),
-      subtitle: `${q.clientName ?? "Sin cliente"} · ${policyTypeLabel(q.policyType)}`,
-      details: cleanStrings([q.policyType, q.notes]),
-      href: `/quotes/${q.id}`,
       match,
     });
   }

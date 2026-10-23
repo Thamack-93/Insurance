@@ -14,7 +14,6 @@ export const SEARCH_ENTITY_LABELS: Record<string, string> = {
   receipt: "Recibo",
   workItem: "Pendiente",
   claim: "Siniestro",
-  quote: "Cotización",
   insurer: "Aseguradora",
   document: "Documento",
 };

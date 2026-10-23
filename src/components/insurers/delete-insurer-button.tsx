@@ -19,8 +19,8 @@ export function DeleteInsurerButton({ id, name }: DeleteInsurerButtonProps) {
       description={
         <>
           ¿Seguro que quieres eliminar <strong>{name}</strong>? Esta acción no se puede deshacer y solo
-          funciona si la aseguradora no tiene pólizas, recibos, comisiones, siniestros ni cotizaciones
-          asociadas.
+          funciona si la aseguradora no tiene pólizas, recibos, comisiones, siniestros ni registros
+          históricos asociados.
         </>
       }
     />

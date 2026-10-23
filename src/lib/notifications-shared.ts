@@ -23,7 +23,7 @@ export function notificationLink(entityType: string, entityId: string, isAdmin =
     case "Claim":
       return `/claims/${entityId}`;
     case "Quote":
-      return `/quotes/${entityId}`;
+      return "/policies";
     case "Document":
       return `/documents`;
     case "Commission":

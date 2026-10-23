@@ -22,7 +22,6 @@ interface UploadFormProps {
     endorsementId?: string;
     receiptId?: string;
     claimId?: string;
-    quoteId?: string;
   };
   className?: string;
   disabled?: boolean;
@@ -65,7 +64,6 @@ export function UploadForm({
     endorsementId?: string;
     receiptId?: string;
     claimId?: string;
-    quoteId?: string;
   }>({
     documentType: "",
     notes: "",

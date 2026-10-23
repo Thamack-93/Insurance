@@ -3,7 +3,7 @@ import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from 
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
-import { StatusBadge } from "@/components/badges/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { documentTypeLabel } from "@/lib/ui-labels";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -20,12 +20,12 @@ import {
   documentOperationalWhere,
   endorsementOperationalWhere,
   policyOperationalWhere,
-  quoteOperationalWhere,
   receiptOperationalWhere,
   requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
+import { getDocumentSituation } from "@/lib/document-situation";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -97,7 +97,7 @@ export default async function DocumentsPage({
       db.document.count({ where }),
       db.document.findMany({
         where,
-        include: { client: true, policy: true, receipt: true, task: true, claim: true, quote: true },
+        include: { client: true, policy: true, endorsement: true, receipt: true, task: true, claim: true, quote: true },
         orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * DEFAULT_PAGE_SIZE,
         take: DEFAULT_PAGE_SIZE,
@@ -109,6 +109,7 @@ export default async function DocumentsPage({
           AND: [
             { clientId: null },
             { policyId: null },
+            { endorsementId: null },
             { receiptId: null },
             { taskId: null },
             { claimId: null },
@@ -166,11 +167,10 @@ export default async function DocumentsPage({
           take: 250,
         }),
         db.claim.findMany({ where: claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), select: { id: true, folio: true, client: { select: { fullName: true } } }, orderBy: { createdAt: "desc" }, take: 250 }),
-        db.quote.findMany({ where: quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId), select: { id: true, policyType: true, client: { select: { fullName: true } } }, orderBy: { createdAt: "desc" }, take: 250 }),
       ]),
     ]);
 
-  const [inboxClients, inboxPolicies, inboxEndorsements, inboxReceipts, inboxTasks, inboxClaims, inboxQuotes] = inboxOptions;
+  const [inboxClients, inboxPolicies, inboxEndorsements, inboxReceipts, inboxTasks, inboxClaims] = inboxOptions;
   const documentInboxOptions: DocumentInboxOptions = {
     clients: inboxClients.map((client) => ({ id: client.id, label: client.fullName })),
     policies: inboxPolicies.map((policy) => ({ id: policy.id, label: `${policy.policyNumber} · ${policy.client.fullName}` })),
@@ -178,7 +178,6 @@ export default async function DocumentsPage({
     receipts: inboxReceipts.map((receipt) => ({ id: receipt.id, label: `${receipt.receiptNumber} · ${receipt.client.fullName}` })),
     tasks: inboxTasks.map((task) => ({ id: task.id, label: `${task.folio} · ${task.title}` })),
     claims: inboxClaims.map((claim) => ({ id: claim.id, label: `${claim.folio} · ${claim.client.fullName}` })),
-    quotes: inboxQuotes.map((quote) => ({ id: quote.id, label: `${quote.client.fullName} · ${quote.policyType}` })),
   };
 
   const linkedDocuments = totalDocs - orphanCount;
@@ -211,7 +210,7 @@ export default async function DocumentsPage({
           <MetricCard
             title="Vinculados"
             value={linkedDocuments}
-            description="Con al menos una relación viva."
+            description="Con vínculo a un cliente o expediente existente."
             icon={Link2}
             tone="emerald"
           />
@@ -277,7 +276,7 @@ export default async function DocumentsPage({
                     <TableHead>Tipo</TableHead>
                     <TableHead>Cliente / Póliza</TableHead>
                     <TableHead>Fecha</TableHead>
-                    <TableHead>Estado</TableHead>
+                    <TableHead>Situación</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -308,17 +307,10 @@ export default async function DocumentsPage({
                       </TableCell>
                       <TableCell>{formatDate(document.uploadedAt)}</TableCell>
                       <TableCell>
-                        <StatusBadge
-                          status={
-                            document.policyId ||
-                            document.receiptId ||
-                            document.taskId ||
-                            document.claimId ||
-                            document.quoteId
-                              ? "ACTIVE"
-                              : "ARCHIVED"
-                          }
-                        />
+                        {(() => {
+                          const situation = getDocumentSituation(document);
+                          return <Badge variant="outline" className={situation.className}>{situation.label}</Badge>;
+                        })()}
                       </TableCell>
                     </TableRow>
                   ))}

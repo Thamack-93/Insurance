@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 
 import { useRouter } from "next/navigation";
 import {
   Building2,
-  Calculator,
   CheckSquare,
   Users,
   FolderKanban,
@@ -28,7 +27,6 @@ const dynamicEntityIcon: Record<SearchResultType, React.ReactNode> = {
   receipt: <ReceiptText className="size-4" />,
   workItem: <CheckSquare className="size-4" />,
   claim: <AlertTriangle className="size-4" />,
-  quote: <Calculator className="size-4" />,
   insurer: <Building2 className="size-4" />,
   document: <FileText className="size-4" />,
 };
@@ -39,7 +37,6 @@ const dynamicEntityLabel: Record<SearchResultType, string> = {
   receipt: "Recibos",
   workItem: "Pendientes",
   claim: "Siniestros",
-  quote: "Cotizaciones",
   insurer: "Aseguradoras",
   document: "Documentos",
 };
@@ -49,7 +46,6 @@ const groupOrder: SearchResultType[] = [
   "policy",
   "receipt",
   "claim",
-  "quote",
   "workItem",
   "insurer",
   "document",
@@ -246,7 +242,6 @@ export function CommandPaletteWrapper({
         { id: "new-client", label: "Nuevo cliente", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/clients/new") },
         { id: "new-task", label: "Nuevo pendiente", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/tasks/new") },
         { id: "new-receipt", label: "Nuevo recibo", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/receipts/new") },
-        { id: "new-quote", label: "Nueva cotización", icon: <Calculator className="size-4" />, onSelect: () => handleSelect("/quotes/new") },
       ],
     },
     {

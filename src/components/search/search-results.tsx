@@ -9,7 +9,6 @@ import {
   ReceiptText,
   CheckSquare,
   AlertTriangle,
-  Calculator,
   Building2,
   FileText,
 } from "lucide-react";
@@ -25,7 +24,6 @@ const entityIcons: Record<SearchResultType, React.ComponentType<{ className?: st
   receipt: ReceiptText,
   workItem: CheckSquare,
   claim: AlertTriangle,
-  quote: Calculator,
   insurer: Building2,
   document: FileText,
 };
@@ -37,7 +35,6 @@ const groupOrder: SearchResultType[] = [
   "policy",
   "receipt",
   "claim",
-  "quote",
   "workItem",
   "insurer",
   "document",

@@ -2,13 +2,8 @@ import { readFileSync } from "node:fs";
 
 const checks = [
   {
-    label: "Cotizaciones desde Pólizas",
+    label: "Pólizas desde navegación general",
     file: "src/app/(dashboard)/policies/page.tsx",
-    markers: ["LocalNavigation", "policyNavigation"],
-  },
-  {
-    label: "Cotizaciones con navegación local propia",
-    file: "src/app/(dashboard)/quotes/page.tsx",
     markers: ["LocalNavigation", "policyNavigation"],
   },
   {

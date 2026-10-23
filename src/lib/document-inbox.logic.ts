@@ -7,7 +7,6 @@ export const DOCUMENT_INBOX_ASSOCIATION_TYPES = [
   "RECEIPT",
   "TASK",
   "CLAIM",
-  "QUOTE",
 ] as const;
 
 export type DocumentInboxAssociationType = (typeof DOCUMENT_INBOX_ASSOCIATION_TYPES)[number];
@@ -17,7 +16,6 @@ const REQUIRED_ASSOCIATION_BY_DOCUMENT_TYPE: Partial<Record<DocumentType, Docume
   RECEIPT: "RECEIPT",
   PAYMENT_PROOF: "RECEIPT",
   ENDORSEMENT: "ENDORSEMENT",
-  QUOTE: "QUOTE",
   CLAIM: "CLAIM",
 };
 

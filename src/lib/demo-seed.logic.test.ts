@@ -67,7 +67,7 @@ describe("seedDemoBaseline", () => {
     expect(count("receipt")).toBe(190);
     expect(upserts.filter(({ delegate }) => delegate === "claim")).toHaveLength(10);
     expect(upserts.filter(({ delegate }) => delegate === "commission")).toHaveLength(8);
-    expect(upserts.filter(({ delegate }) => delegate === "quote")).toHaveLength(12);
+    expect(upserts.some(({ delegate }) => delegate === "quote" || delegate === "quoteComparison" || delegate === "quoteComparisonItem")).toBe(false);
     const seededPolicies = upserts.filter(({ delegate }) => delegate === "policy").slice(0, 40).map(({ args }) => args.create as Record<string, unknown>);
     for (const frequency of ["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"]) expect(seededPolicies.filter(policy => policy.paymentFrequency === frequency)).toHaveLength(10);
     const policyCountsByClient = [...seededPolicies.reduce((counts, policy) => counts.set(String(policy.clientId), (counts.get(String(policy.clientId)) ?? 0) + 1), new Map<string, number>()).values()].sort((left, right) => left - right);
@@ -136,14 +136,13 @@ describe("seedDemoBaseline", () => {
     });
     const paymentCount = vi.fn(async ({ where }: { where?: { status?: string } }): Promise<number> => where?.status === "POSTED" ? 176 : where?.status === "REVERSED" ? 1 : 177);
     const claimCount = vi.fn(async ({ where }: { where?: { status?: string } }): Promise<number> => where?.status === "RESOLVED" ? 1 : 5);
-    const quoteCount = vi.fn(async ({ where }: { where?: { status?: string } }): Promise<number> => where?.status === "REJECTED" || where?.status === "EXPIRED" ? 1 : 6);
     const tx = {
       client: { count: vi.fn().mockResolvedValue(20) }, policy: { count }, receipt: { count: receiptCount },
       payment: { count: paymentCount },
-      claim: { count: claimCount }, commission: { count: vi.fn().mockResolvedValue(4) }, quote: { count: quoteCount },
+      claim: { count: claimCount }, commission: { count: vi.fn().mockResolvedValue(4) },
       workItem: { count: vi.fn().mockResolvedValue(2) }, document: { findUnique: vi.fn().mockResolvedValue({ organizationId: "demo-org", filePath: "demo://demo-org/synthetic/policy-001", notes: "PDF sintético" }) },
     };
-    await expect(validateDemoBaseline(tx as never, "demo-org")).resolves.toMatchObject({ policies: 40, receipts: 190, structuredPolicies: 40, unrecognizedPolicyTypes: 0, receiptSchedules: { ANNUAL: 10, SEMIANNUAL: 10, QUARTERLY: 10, MONTHLY: 10 }, scenarios: { describedPolicies: 40, expiredPolicies: 8, renewalsWithinTenDays: 1, paidReceipts: 176, pendingReceipts: 1, overdueReceipts: 1, postedPayments: 176, reversedPayments: 1, cancelledPolicies: 1, cancelledReceipts: 12, resolvedClaims: 1, rejectedQuotes: 1, expiredQuotes: 1 } });
+    await expect(validateDemoBaseline(tx as never, "demo-org")).resolves.toMatchObject({ policies: 40, receipts: 190, structuredPolicies: 40, unrecognizedPolicyTypes: 0, receiptSchedules: { ANNUAL: 10, SEMIANNUAL: 10, QUARTERLY: 10, MONTHLY: 10 }, scenarios: { describedPolicies: 40, expiredPolicies: 8, renewalsWithinTenDays: 1, paidReceipts: 176, pendingReceipts: 1, overdueReceipts: 1, postedPayments: 176, reversedPayments: 1, cancelledPolicies: 1, cancelledReceipts: 12, resolvedClaims: 1 } });
     policiesWithoutRiskDetails = 1;
     await expect(validateDemoBaseline(tx as never, "demo-org")).rejects.toThrow("DEMO_SEED_VALIDATION_FAILED");
     policiesWithoutRiskDetails = 0;

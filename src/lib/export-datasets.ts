@@ -12,13 +12,10 @@ import {
   buildClientListWhere,
   buildPolicyListOrderBy,
   buildPolicyListWhere,
-  buildQuoteListOrderBy,
-  buildQuoteListWhere,
   buildReceiptListOrderBy,
   buildReceiptListWhere,
   readClientListFilters,
   readPolicyListFilters,
-  readQuoteListFilters,
   readReceiptListFilters,
 } from "@/lib/list-filters";
 
@@ -187,53 +184,10 @@ const receiptsDataset: ExportDataset = {
   },
 };
 
-const quotesDataset: ExportDataset = {
-  label: "Cotizaciones",
-  async load(params) {
-    const scope = await requireOrganizationPortfolioReadScope();
-    const filters = readQuoteListFilters(params);
-    const records = await withTenantOrganization(scope.organizationId, (db) => db.quote.findMany({
-      where: buildQuoteListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
-      orderBy: buildQuoteListOrderBy(filters),
-      include: { client: true, insurer: true },
-      take: EXPORT_ROW_LIMIT + 1,
-    }));
-
-    const truncated = records.length > EXPORT_ROW_LIMIT;
-
-    return {
-      sheetName: "Cotizaciones",
-      fileBaseName: "cotizaciones",
-      truncated,
-      columns: columns([
-        { clave: "folio", etiqueta: "Folio" },
-        { clave: "cliente", etiqueta: "Cliente" },
-        { clave: "tipo", etiqueta: "Tipo" },
-        { clave: "aseguradora", etiqueta: "Aseguradora" },
-        { clave: "estado", etiqueta: "Estado" },
-        { clave: "creada", etiqueta: "Creada" },
-        { clave: "vigencia", etiqueta: "Vigente hasta" },
-        { clave: "prima", etiqueta: "Prima" },
-      ]),
-      rows: records.slice(0, EXPORT_ROW_LIMIT).map((quote) => ({
-        folio: quote.id.slice(0, 8),
-        cliente: quote.client.fullName,
-        tipo: policyTypeLabel(quote.policyType),
-        aseguradora: quote.insurer?.name ?? "",
-        estado: statusLabel(quote.status, "quote"),
-        creada: formatDate(quote.createdAt),
-        vigencia: quote.validUntil ? formatDate(quote.validUntil) : "",
-        prima: quote.quotedAmount === null ? "" : toNumber(quote.quotedAmount),
-      })),
-    };
-  },
-};
-
 export const EXPORT_DATASETS = {
   clients: clientsDataset,
   policies: policiesDataset,
   receipts: receiptsDataset,
-  quotes: quotesDataset,
 } satisfies Record<string, ExportDataset>;
 
 export type ExportDatasetKey = keyof typeof EXPORT_DATASETS;

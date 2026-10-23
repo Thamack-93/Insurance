@@ -4,12 +4,11 @@ import type { Prisma } from "@/generated/prisma/client";
 import {
   clientOperationalWhere,
   policyOperationalWhere,
-  quoteOperationalWhere,
   receiptOperationalWhere,
 } from "@/lib/portfolio-access";
 import { businessAddDays } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
-import { ENTITY_STATUSES, POLICY_STATUSES, POLICY_TYPES, QUOTE_STATUSES } from "@/lib/domain-values";
+import { ENTITY_STATUSES, POLICY_STATUSES, POLICY_TYPES } from "@/lib/domain-values";
 import {
   amountMatchWindow,
   parseSearchQuery,
@@ -180,79 +179,6 @@ export function buildPolicyListOrderBy({ sortKey, direction }: PolicyListFilters
       return [{ premiumAmount: direction ?? "desc" }, { endDate: "asc" }, { id: "asc" }];
     default:
       return [{ endDate: "asc" }, { startDate: "asc" }, { updatedAt: "desc" }, { id: "asc" }];
-  }
-}
-
-// ---------------------------------------------------------------- quotes
-
-export type QuoteListFilters = ListFilters & {
-  status?: (typeof QUOTE_STATUSES)[number];
-  /** True only when the user explicitly asks to include terminal quotes. */
-  allStatuses?: boolean;
-};
-
-export function readQuoteListFilters(params: TableSearchParams): QuoteListFilters {
-  const rawStatus = readTableParam(params, "status");
-  return {
-    ...readBaseFilters(params),
-    status: rawStatus === "ALL" ? undefined : readAllowedTableParam(params, "status", QUOTE_STATUSES),
-    allStatuses: rawStatus === "ALL",
-  };
-}
-
-export function buildQuoteListWhere(
-  filters: QuoteListFilters,
-  portfolioOwnerId: string | undefined,
-  organizationId: string,
-): Prisma.QuoteWhereInput {
-  const { parsedQuery } = filters;
-  const base: Prisma.QuoteWhereInput = {
-    ...quoteOperationalWhere(portfolioOwnerId, organizationId),
-    ...(filters.status
-      ? { status: filters.status }
-      : filters.allStatuses
-        ? {}
-        : { status: { notIn: ["EXPIRED", "CANCELLED", "REJECTED"] } }),
-  };
-
-  if (!parsedQuery.raw) return base;
-
-  const or: Prisma.QuoteWhereInput[] = [
-    { client: { fullName: { contains: parsedQuery.raw } } },
-    { insurer: { name: { contains: parsedQuery.raw } } },
-    { policyType: { contains: parsedQuery.raw } },
-  ];
-
-  if (parsedQuery.amount !== null) {
-    or.push({ quotedAmount: amountMatchWindow(parsedQuery.amount) });
-  }
-
-  if (parsedQuery.date) {
-    or.push({ createdAt: { gte: parsedQuery.date.from, lt: parsedQuery.date.to } });
-    or.push({ validUntil: { gte: parsedQuery.date.from, lt: parsedQuery.date.to } });
-  }
-
-  return { AND: [base, { OR: or }] };
-}
-
-export function buildQuoteListOrderBy({ sortKey, direction }: QuoteListFilters): Prisma.QuoteOrderByWithRelationInput[] {
-  switch (sortKey) {
-    case "folio":
-      return [{ id: direction ?? "asc" }];
-    case "client":
-      return [{ client: { fullName: direction ?? "asc" } }, { createdAt: "desc" }, { id: "asc" }];
-    case "type":
-      return [{ policyType: direction ?? "asc" }, { createdAt: "desc" }, { id: "asc" }];
-    case "insurer":
-      return [{ insurer: { name: direction ?? "asc" } }, { createdAt: "desc" }, { id: "asc" }];
-    case "status":
-      return [{ status: direction ?? "asc" }, { createdAt: "desc" }, { id: "asc" }];
-    case "createdAt":
-      return [{ createdAt: direction ?? "desc" }, { id: "desc" }];
-    case "value":
-      return [{ quotedAmount: direction ?? "desc" }, { createdAt: "desc" }, { id: "asc" }];
-    default:
-      return [{ createdAt: "desc" }, { id: "desc" }];
   }
 }
 

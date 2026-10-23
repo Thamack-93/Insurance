@@ -187,37 +187,6 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
     }
   }
 
-  // Several quotes make the renewal and comparison screens immediately
-  // useful while keeping every provider and document reference synthetic.
-  const quoteInputs = [
-    { ordinal: 1, clientId: clients[4].id, insurerId: insurerA, type: "AUTO", status: "SENT" as const, amount: 21400 },
-    { ordinal: 2, clientId: clients[4].id, insurerId: insurerB, type: "AUTO", status: "ACCEPTED" as const, amount: 22900 },
-    { ordinal: 3, clientId: clients[4].id, insurerId: insurerC, type: "AUTO", status: "IN_PROGRESS" as const, amount: 20100 },
-    { ordinal: 4, clientId: clients[5].id, insurerId: insurerB, type: "GMM", status: "SENT" as const, amount: 81200 },
-    { ordinal: 5, clientId: clients[6].id, insurerId: insurerC, type: "AUTO", status: "REJECTED" as const, amount: 24500 },
-    { ordinal: 6, clientId: clients[7].id, insurerId: insurerA, type: "GMM", status: "EXPIRED" as const, amount: 79200 },
-  ];
-  for (const quote of quoteInputs) {
-    await tx.quote.upsert({
-      where: { id: id(organizationId, "quote", quote.ordinal) },
-      update: { organizationId, clientId: quote.clientId, insurerId: quote.insurerId, policyType: quote.type, status: quote.status, requestedDate: addDays(now, -12), sentDate: addDays(now, -8), validUntil: quote.ordinal === 6 ? addDays(now, -1) : addDays(now, 18), quotedAmount: quote.amount, notes: "Cotización de ejemplo", createdById: actorUserId, updatedById: actorUserId },
-      create: { id: id(organizationId, "quote", quote.ordinal), organizationId, clientId: quote.clientId, insurerId: quote.insurerId, policyType: quote.type, status: quote.status, requestedDate: addDays(now, -12), sentDate: addDays(now, -8), validUntil: quote.ordinal === 6 ? addDays(now, -1) : addDays(now, 18), quotedAmount: quote.amount, notes: "Cotización de ejemplo", createdById: actorUserId, updatedById: actorUserId },
-    });
-  }
-  const comparisonId = id(organizationId, "quote-comparison", 1);
-  await tx.quoteComparison.upsert({
-    where: { id: comparisonId },
-    update: { organizationId, clientId: clients[4].id, policyType: "AUTO", status: "REVIEW", selectedQuoteId: id(organizationId, "quote", 2), selectedAt: null, selectionReason: null, version: 1, createdById: actorUserId },
-    create: { id: comparisonId, organizationId, clientId: clients[4].id, policyType: "AUTO", status: "REVIEW", createdById: actorUserId },
-  });
-  for (const [index, quoteOrdinal] of [1, 2, 3].entries()) {
-    await tx.quoteComparisonItem.upsert({
-      where: { comparisonId_quoteId: { comparisonId, quoteId: id(organizationId, "quote", quoteOrdinal) } },
-      update: { organizationId, termsJson: JSON.stringify({ deductible: index === 1 ? 5000 : 7000, coverage: index === 2 ? "Amplia" : "Limitada" }), reviewStatus: index === 1 ? "RECOMMENDED" : "REVIEW" },
-      create: { id: id(organizationId, "quote-comparison-item", index + 1), organizationId, comparisonId, quoteId: id(organizationId, "quote", quoteOrdinal), termsJson: JSON.stringify({ deductible: index === 1 ? 5000 : 7000, coverage: index === 2 ? "Amplia" : "Limitada" }), reviewStatus: index === 1 ? "RECOMMENDED" : "REVIEW" },
-    });
-  }
-
   const statementId = id(organizationId, "commission-statement", 1);
   await tx.commissionStatement.upsert({
     where: { id: statementId },
@@ -316,13 +285,12 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
 
 export async function validateDemoBaseline(tx: Prisma.TransactionClient, organizationId: string) {
   const now = new Date(`${getBusinessDateKey(new Date())}T12:00:00.000Z`);
-  const [clients, policies, receipts, claims, commissions, quotes, collectionFollowUps, document, describedPolicies, policiesWithoutRiskDetails, unrecognizedPolicyTypes, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments, cancelledPolicies, cancelledReceipts, resolvedClaims, rejectedQuotes, expiredQuotes] = await Promise.all([
+  const [clients, policies, receipts, claims, commissions, collectionFollowUps, document, describedPolicies, policiesWithoutRiskDetails, unrecognizedPolicyTypes, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments, cancelledPolicies, cancelledReceipts, resolvedClaims] = await Promise.all([
     tx.client.count({ where: { organizationId } }),
     tx.policy.count({ where: { organizationId } }),
     tx.receipt.count({ where: { organizationId } }),
     tx.claim.count({ where: { organizationId } }),
     tx.commission.count({ where: { organizationId } }),
-    tx.quote.count({ where: { organizationId } }),
     tx.workItem.count({ where: { organizationId, sourceType: "Collection", title: { startsWith: "Promesa de pago DEMO" } } }),
     tx.document.findUnique({ where: { id: id(organizationId, "document", 1) }, select: { organizationId: true, filePath: true, notes: true } }),
     tx.policy.count({ where: { organizationId, insuredObject: { not: null } } }),
@@ -338,17 +306,15 @@ export async function validateDemoBaseline(tx: Prisma.TransactionClient, organiz
     tx.policy.count({ where: { organizationId, status: "CANCELLED" } }),
     tx.receipt.count({ where: { organizationId, status: "CANCELLED" } }),
     tx.claim.count({ where: { organizationId, status: "RESOLVED" } }),
-    tx.quote.count({ where: { organizationId, status: "REJECTED" } }),
-    tx.quote.count({ where: { organizationId, status: "EXPIRED" } }),
   ]);
   const [annualPolicies, semiannualPolicies, quarterlyPolicies, monthlyPolicies] = await Promise.all(["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"].map(paymentFrequency => tx.policy.count({ where: { organizationId, paymentFrequency } })));
   if (
-    clients !== 20 || policies !== 40 || receipts !== 190 || annualPolicies !== 10 || semiannualPolicies !== 10 || quarterlyPolicies !== 10 || monthlyPolicies !== 10 || claims < 5 || commissions < 4 || quotes < 6 || collectionFollowUps !== 2 ||
+    clients !== 20 || policies !== 40 || receipts !== 190 || annualPolicies !== 10 || semiannualPolicies !== 10 || quarterlyPolicies !== 10 || monthlyPolicies !== 10 || claims < 5 || commissions < 4 || collectionFollowUps !== 2 ||
     describedPolicies !== 40 || policiesWithoutRiskDetails !== 0 || unrecognizedPolicyTypes !== 0 || expiredPolicies !== 8 || renewalsWithinTenDays !== 1 || paidReceipts !== 176 || pendingReceipts !== 1 || overdueReceipts !== 1 || postedPayments !== 176 || reversedPayments !== 1 ||
-    cancelledPolicies !== 1 || cancelledReceipts !== 12 || resolvedClaims !== 1 || rejectedQuotes !== 1 || expiredQuotes !== 1 ||
+    cancelledPolicies !== 1 || cancelledReceipts !== 12 || resolvedClaims !== 1 ||
     document?.organizationId !== organizationId || document.filePath !== `demo://${organizationId}/synthetic/policy-001` || !document.notes?.includes("sintético")
   ) {
     throw new Error("DEMO_SEED_VALIDATION_FAILED");
   }
-  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, quotes, collectionFollowUps, structuredPolicies: policies - policiesWithoutRiskDetails, unrecognizedPolicyTypes, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments, cancelledPolicies, cancelledReceipts, resolvedClaims, rejectedQuotes, expiredQuotes }, syntheticDocument: true as const };
+  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, collectionFollowUps, structuredPolicies: policies - policiesWithoutRiskDetails, unrecognizedPolicyTypes, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments, cancelledPolicies, cancelledReceipts, resolvedClaims }, syntheticDocument: true as const };
 }

@@ -25,7 +25,6 @@ type Associations = {
   endorsementId?: string;
   receiptId?: string;
   claimId?: string;
-  quoteId?: string;
 };
 
 type Item = {

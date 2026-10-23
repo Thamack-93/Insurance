@@ -6,7 +6,6 @@ import {
   claimOperationalWhere,
   documentOperationalWhere,
   policyOperationalWhere,
-  quoteOperationalWhere,
   receiptOperationalWhere,
   workItemOperationalWhere,
 } from "@/lib/portfolio-access";
@@ -21,7 +20,6 @@ describe("portfolio access helpers", () => {
     expect(policyOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
     expect(receiptOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
     expect(claimOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
-    expect(quoteOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
     expect(workItemOperationalWhere("agent-1", "org-a")).toEqual({
       organizationId: "org-a",
       OR: [{ client: { portfolioOwnerId: "agent-1" } }, { clientId: null, assignedToId: "agent-1" }],
@@ -57,7 +55,6 @@ describe("portfolio access helpers", () => {
     expect(policyOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
     expect(receiptOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
     expect(claimOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
-    expect(quoteOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
     expect(documentOperationalWhere(undefined, "org-a")).toEqual({ organizationId: "org-a" });
     expect(workItemOperationalWhere(undefined, "org-a")).toEqual({ organizationId: "org-a" });
   });

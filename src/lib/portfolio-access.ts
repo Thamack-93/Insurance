@@ -110,15 +110,9 @@ export function claimOperationalWhere(portfolioOwnerId: string | undefined, orga
   };
 }
 
-export function quotePortfolioWhere(userId: string): Prisma.QuoteWhereInput {
+/** Keep legacy Quote-linked documents within the owning agent's portfolio. */
+function quotePortfolioWhere(userId: string): Prisma.QuoteWhereInput {
   return { client: clientPortfolioWhere(userId) };
-}
-
-export function quoteOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.QuoteWhereInput {
-  return {
-    organizationId,
-    client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) },
-  };
 }
 
 export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInput {

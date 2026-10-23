@@ -32,7 +32,6 @@ describe("global navigation", () => {
     ["/tasks/task-1", "operations"],
     ["/renewals", "operations"],
     ["/claims/claim-1", "operations"],
-    ["/quotes/quote-1", "policies"],
     ["/due-payments", "receipts"],
     ["/payments/new", "receipts"],
     ["/portfolio", "reports"],
@@ -55,7 +54,7 @@ describe("global navigation", () => {
     const reports = globalNavigation.find((item) => item.id === "reports");
 
     expect(policies?.redirectAliases).toBeUndefined();
-    expect(policies?.activePaths).toContain("/quotes");
+    expect(policies?.activePaths).toBeUndefined();
     expect(reports?.redirectAliases).toBeUndefined();
     expect(reports?.activePaths).toContain("/portfolio");
   });
@@ -63,11 +62,7 @@ describe("global navigation", () => {
 
 describe("local navigation", () => {
   it("marks functional section views active without changing their canonical paths", () => {
-    expect(isLocalNavigationItemActive(
-      policyNavigation.find((item) => item.href === "/quotes")!,
-      "/quotes",
-      new URLSearchParams(),
-    )).toBe(true);
+    expect(policyNavigation.some((item) => item.href === "/quotes")).toBe(false);
     expect(isLocalNavigationItemActive(
       reportsNavigation.find((item) => item.href === "/portfolio")!,
       "/portfolio",

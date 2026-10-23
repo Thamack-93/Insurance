@@ -7,9 +7,8 @@ describe("document inbox association validation", () => {
     expect(getDocumentInboxAssociationError("POLICY", "CLIENT")).toContain("no corresponde");
   });
 
-  it("requires financial, quote, claim and endorsement documents to match their record type", () => {
+  it("requires financial, claim and endorsement documents to match their record type", () => {
     expect(getDocumentInboxAssociationError("PAYMENT_PROOF", "RECEIPT")).toBeNull();
-    expect(getDocumentInboxAssociationError("QUOTE", "QUOTE")).toBeNull();
     expect(getDocumentInboxAssociationError("CLAIM", "CLAIM")).toBeNull();
     expect(getDocumentInboxAssociationError("ENDORSEMENT", "POLICY")).toContain("no corresponde");
   });
@@ -18,11 +17,11 @@ describe("document inbox association validation", () => {
     expect(getDocumentInboxAssociationError("ID", "CLIENT")).toBeNull();
     expect(getDocumentInboxAssociationError("RENEWAL", "POLICY")).toBeNull();
     expect(getDocumentInboxAssociationError("LETTER", "TASK")).toBeNull();
-    expect(getDocumentInboxAssociationError("OTHER", "QUOTE")).toBeNull();
+    expect(getDocumentInboxAssociationError("OTHER", "POLICY")).toBeNull();
   });
 
   it("rejects values outside existing document and association types", () => {
     expect(getDocumentInboxAssociationError("AUTOMATIC", "CLIENT")).toContain("clasificación");
-    expect(getDocumentInboxAssociationError("OTHER", "WORK_ITEM")).toContain("expediente");
+    expect(getDocumentInboxAssociationError("OTHER", "QUOTE")).toContain("expediente");
   });
 });
