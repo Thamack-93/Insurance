@@ -54,9 +54,13 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader eyebrow="Finanzas" title="Bonos e incentivos" description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles." actions={<LocalNavigation items={commissionNavigation} label="Comisiones y bonos" variant="compact" />} />
-      <SectionCard title="Nueva proyección" description="Elige el programa y el corte que corresponda. Los datos faltantes se marcarán para revisión antes de aprobar.">
-        <div className="p-4 sm:p-5 lg:p-6">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <PageHeader eyebrow="Finanzas" title="Bonos e incentivos" description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles." />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <LocalNavigation items={commissionNavigation} label="Comisiones y bonos" variant="compact" />
+        </div>
+        <SectionCard title="Nueva proyección" description="Elige el programa y el corte que corresponda. Los datos faltantes se marcarán para revisión antes de aprobar.">
+          <div className="p-4 sm:p-5 lg:p-6">
           <BonusProjectionForm
             programs={BONUS_PROGRAMS.map(({ key, label, period, accumulation }) => ({ key, label, period, accumulation }))}
             sellers={sellers}
@@ -65,8 +69,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             initialPeriodNumber={run?.periodNumber ?? 1}
             initialLossRatio={run?.programKey.startsWith("DAMAGE_") && snapshot.input?.damagePortfolioLossRatio !== null && snapshot.input?.damagePortfolioLossRatio !== undefined ? String(snapshot.input.damagePortfolioLossRatio * 100) : ""}
           />
-        </div>
-      </SectionCard>
+          </div>
+        </SectionCard>
 
       <SectionCard title="Proyecciones y cierres recientes" description="Consulta el estado y el corte de cada cálculo guardado para esta organización.">
         {recentRuns.length ? <details className="group" open={Boolean(runId)}>
@@ -90,7 +94,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
         </details> : <p className="p-6 text-center text-sm text-muted-foreground">Aún no hay proyecciones guardadas.</p>}
       </SectionCard>
 
-      {run && program ? (
+        {run && program ? (
         <SectionCard title={`${program.label} · ${run.seller.name}`} description={`2026 · ${bonusPeriodLabel(program, run.periodNumber)} · Estado: ${run.status === "APPROVED" ? "Aprobado" : run.status === "READY" ? "Listo para aprobar" : "Pendiente de revisión"}`} action={<ExportButtons exports={[{ name: "Detalle de bono", data: run.items.map((item) => ({
           "Estado": item.status === "INCLUDED" ? "Incluida" : item.status === "EXCLUDED" ? "Excluida" : "Revisión",
           "Fecha de pago": item.payment?.paidDate?.toISOString().slice(0, 10) ?? "",
@@ -126,7 +130,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             {run.status !== "APPROVED" ? <form action={approveBonusRun}><input type="hidden" name="runId" value={run.id} /><input type="hidden" name="version" value={run.version} /><Button type="submit" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")}>Aprobar cierre</Button></form> : null}
           </div>
         </SectionCard>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }
