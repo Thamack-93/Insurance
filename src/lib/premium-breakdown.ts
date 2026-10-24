@@ -14,6 +14,8 @@ export function roundPremiumMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+const PREMIUM_RECONCILIATION_TOLERANCE = 1;
+
 /** Returns null until every component is explicitly captured. */
 export function deriveNetPremium(amount: number, breakdown: PremiumBreakdown): number | null {
   const components = [breakdown.vatAmount, breakdown.issuanceExpenseAmount, breakdown.surchargeAmount, breakdown.discountAmount];
@@ -50,7 +52,7 @@ export function reconcileEndorsementReceiptPremium(endorsementPremium: number, r
   const receiptTotal = roundPremiumMoney(receiptAmounts.filter((receipt) => receipt.status !== "CANCELLED").reduce((sum, receipt) => sum + receipt.amount, 0));
   const expectedTotal = roundPremiumMoney(endorsementPremium);
   const difference = roundPremiumMoney(expectedTotal - receiptTotal);
-  return { expectedTotal, receiptTotal, difference, status: Math.abs(difference) <= 0.01 ? "RECONCILED" as const : "REVIEW" as const };
+  return { expectedTotal, receiptTotal, difference, status: Math.abs(difference) <= PREMIUM_RECONCILIATION_TOLERANCE ? "RECONCILED" as const : "REVIEW" as const };
 }
 
 export function allocatePaidNetPremium(netPremium: number, receiptAmount: number, postedPaymentAmount: number) {
@@ -63,5 +65,5 @@ export function reconcilePolicyReceiptPremium(policyPremium: number, receiptAmou
   const receiptTotal = roundPremiumMoney(baseReceipts.reduce((sum, receipt) => sum + receipt.amount, 0));
   const expectedTotal = roundPremiumMoney(policyPremium);
   const difference = roundPremiumMoney(expectedTotal - receiptTotal);
-  return { expectedTotal, receiptTotal, difference, status: Math.abs(difference) <= 0.01 ? "RECONCILED" as const : "REVIEW" as const };
+  return { expectedTotal, receiptTotal, difference, status: Math.abs(difference) <= PREMIUM_RECONCILIATION_TOLERANCE ? "RECONCILED" as const : "REVIEW" as const };
 }

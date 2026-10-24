@@ -3,6 +3,7 @@ import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { globalSearch } from "@/lib/search";
 import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
+import { reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 import { getOverdueRenewals, getUpcomingRenewals } from "@/lib/renewals";
 import {
   clientOperationalWhere,
@@ -175,6 +176,35 @@ export type LedgerReviewIssue = {
   resolutionNote: string | null;
   reviewedAt: Date | null;
   createdAt: Date;
+};
+
+export type PremiumReconciliationReview = {
+  id: string;
+  kind: "POLICY" | "ENDORSEMENT";
+  policyId: string;
+  policyNumber: string;
+  recordLabel: string;
+  clientName: string;
+  insurerName: string;
+  expectedTotal: number;
+  receiptTotal: number;
+  difference: number;
+  currency: string;
+  updatedAt: Date;
+};
+
+export type CommissionReviewCandidate = {
+  receiptId: string;
+  receiptNumber: string;
+  policyId: string;
+  policyNumber: string;
+  clientName: string;
+  insurerName: string;
+  amount: number;
+  currency: string;
+  reason: string | null;
+  calculationStatus: string;
+  updatedAt: Date;
 };
 
 function describeDisposition(status: string, suppressedByRuleId: string | null, duplicateOfId: string | null) {
@@ -522,6 +552,138 @@ export async function getLedgerReviewIssues(organizationId: string): Promise<Led
       resolutionNote: issue.resolutionNote,
       reviewedAt: issue.reviewedAt,
       createdAt: issue.createdAt,
+    }));
+  });
+}
+
+export async function getPremiumReconciliationReviews(organizationId: string): Promise<PremiumReconciliationReview[]> {
+  return withQualityTenant(organizationId, async (db) => {
+    const policies = await db.policy.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        policyNumber: true,
+        premiumAmount: true,
+        currency: true,
+        updatedAt: true,
+        client: { select: { fullName: true } },
+        insurer: { select: { name: true } },
+        receipts: {
+          where: { organizationId, status: { not: "CANCELLED" } },
+          select: { amount: true, status: true, endorsementId: true },
+        },
+        endorsements: {
+          where: { organizationId, status: { not: "CANCELLED" } },
+          select: {
+            id: true,
+            endorsementNumber: true,
+            amount: true,
+            currency: true,
+            updatedAt: true,
+            receipts: {
+              where: { organizationId, status: { not: "CANCELLED" } },
+              select: { amount: true, status: true },
+            },
+          },
+        },
+      },
+      orderBy: [{ updatedAt: "desc" }],
+      take: 1000,
+    });
+
+    const reviews: PremiumReconciliationReview[] = [];
+    for (const policy of policies) {
+      const baseReceipts = policy.receipts.filter((receipt) => !receipt.endorsementId);
+      if (baseReceipts.length) {
+        const reconciliation = reconcilePolicyReceiptPremium(Number(policy.premiumAmount), baseReceipts.map((receipt) => ({
+          amount: Number(receipt.amount), status: receipt.status,
+        })));
+        if (reconciliation.status === "REVIEW") {
+          reviews.push({
+            id: `policy:${policy.id}`,
+            kind: "POLICY",
+            policyId: policy.id,
+            policyNumber: policy.policyNumber,
+            recordLabel: policy.policyNumber,
+            clientName: policy.client.fullName,
+            insurerName: policy.insurer.name,
+            expectedTotal: reconciliation.expectedTotal,
+            receiptTotal: reconciliation.receiptTotal,
+            difference: reconciliation.difference,
+            currency: policy.currency,
+            updatedAt: policy.updatedAt,
+          });
+        }
+      }
+
+      for (const endorsement of policy.endorsements) {
+        if (!endorsement.receipts.length) continue;
+        const reconciliation = reconcileEndorsementReceiptPremium(Number(endorsement.amount), endorsement.receipts.map((receipt) => ({
+          amount: Number(receipt.amount), status: receipt.status,
+        })));
+        if (reconciliation.status !== "REVIEW") continue;
+        reviews.push({
+          id: `endorsement:${endorsement.id}`,
+          kind: "ENDORSEMENT",
+          policyId: policy.id,
+          policyNumber: policy.policyNumber,
+          recordLabel: `${policy.policyNumber} · Endoso ${endorsement.endorsementNumber}`,
+          clientName: policy.client.fullName,
+          insurerName: policy.insurer.name,
+          expectedTotal: reconciliation.expectedTotal,
+          receiptTotal: reconciliation.receiptTotal,
+          difference: reconciliation.difference,
+          currency: endorsement.currency,
+          updatedAt: endorsement.updatedAt,
+        });
+      }
+    }
+    return reviews;
+  });
+}
+
+export async function getCommissionReviewCandidates(organizationId: string): Promise<CommissionReviewCandidate[]> {
+  return withQualityTenant(organizationId, async (db) => {
+    const receipts = await db.receipt.findMany({
+      where: {
+        organizationId,
+        status: { not: "CANCELLED" },
+        commissionCalculationStatus: { in: ["NOT_CALCULATED", "REVIEW"] },
+        payments: { some: { organizationId, status: "POSTED" } },
+      },
+      select: {
+        id: true,
+        receiptNumber: true,
+        amount: true,
+        currency: true,
+        commissionCalculationStatus: true,
+        commissionReviewReason: true,
+        updatedAt: true,
+        policy: {
+          select: {
+            id: true,
+            policyNumber: true,
+            client: { select: { fullName: true } },
+            insurer: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: [{ updatedAt: "desc" }],
+      take: 1000,
+    });
+
+    return receipts.map((receipt) => ({
+      receiptId: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+      policyId: receipt.policy.id,
+      policyNumber: receipt.policy.policyNumber,
+      clientName: receipt.policy.client.fullName,
+      insurerName: receipt.policy.insurer.name,
+      amount: toNumber(receipt.amount),
+      currency: receipt.currency,
+      reason: receipt.commissionReviewReason,
+      calculationStatus: receipt.commissionCalculationStatus,
+      updatedAt: receipt.updatedAt,
     }));
   });
 }

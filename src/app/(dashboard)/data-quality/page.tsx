@@ -29,9 +29,11 @@ import {
   listActivePoliciesWithoutReceipts,
   getReceiptReviewIssues,
   getRenewalReviewSuggestions,
+  getPremiumReconciliationReviews,
+  getCommissionReviewCandidates,
 } from "@/lib/data-quality";
 import { formatDate } from "@/lib/dates";
-import { formatCurrency } from "@/lib/money";
+import { formatCurrency, formatCurrencyExact } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
@@ -99,6 +101,25 @@ function matchesTableQuery(query: string, ...values: Array<string | null | undef
   return values.some((value) => value?.toLowerCase().includes(query));
 }
 
+type ReviewInboxItem = {
+  id: string;
+  category: "Prima" | "Pagos" | "Comisiones" | "Renovaciones" | "Ledger";
+  subject: string;
+  clientName: string;
+  insurerName: string;
+  reason: string;
+  amount: number | null;
+  currency: string | null;
+  updatedAt: Date;
+  href: string;
+  actionLabel: string;
+};
+
+function displayReviewReason(reason: string | null | undefined) {
+  const label = dataQualityReasonLabel(reason);
+  return label === "Revisión requerida" && reason ? reason.replaceAll("_", " ") : label;
+}
+
 export default async function DataQualityPage({
   searchParams,
 }: {
@@ -107,15 +128,16 @@ export default async function DataQualityPage({
   const organizationContext = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const params = (await searchParams) ?? {};
   const initialTab =
-    params.tab === "salud" || params.tab === "vigencias" || params.tab === "pagos" || params.tab === "renovaciones" || params.tab === "ledger"
+    params.tab === "revisiones" || params.tab === "salud" || params.tab === "vigencias" || params.tab === "pagos" || params.tab === "renovaciones" || params.tab === "ledger"
       ? params.tab
-      : "salud";
+      : "revisiones";
   const query = (typeof params.q === "string" ? params.q : "").trim().toLowerCase();
   const page = readTablePage(params);
   const { sortKey, direction } = readTableSort(params);
   const previewBatchId = typeof params.ledgerBatch === "string" ? params.ledgerBatch : null;
   const portfolioOwnerId = undefined;
   const loadHealth = initialTab === "salud";
+  const loadReviews = initialTab === "revisiones";
   const loadVigencias = initialTab === "vigencias";
   const loadPagos = initialTab === "pagos";
   const loadRenovaciones = initialTab === "renovaciones";
@@ -130,6 +152,8 @@ export default async function DataQualityPage({
     renewalReviewSuggestions,
     ledgerReviewIssues,
     renewalFollowUps,
+    premiumReconciliationReviews,
+    commissionReviewCandidates,
   ] = await Promise.all([
     loadHealth ? getClientDataQualityScores(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
     loadHealth ? getPolicyDataQualityScores(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
@@ -140,10 +164,12 @@ export default async function DataQualityPage({
     }),
     loadVigencias ? getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT", organizationContext.organizationId) : Promise.resolve(null),
     loadPagos ? getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT", organizationContext.organizationId) : Promise.resolve(null),
-    loadPagos ? getReceiptReviewIssues(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
-    loadRenovaciones ? getRenewalReviewSuggestions(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
-    loadLedger ? getLedgerReviewIssues(organizationContext.organizationId) : Promise.resolve([]),
+    loadPagos || loadReviews ? getReceiptReviewIssues(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
+    loadRenovaciones || loadReviews ? getRenewalReviewSuggestions(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
+    loadLedger || loadReviews ? getLedgerReviewIssues(organizationContext.organizationId) : Promise.resolve([]),
     loadHealth || loadRenovaciones ? getUpcomingRenewals(30, portfolioOwnerId, organizationContext.organizationId) : Promise.resolve([]),
+    loadReviews ? getPremiumReconciliationReviews(organizationContext.organizationId) : Promise.resolve([]),
+    loadReviews ? getCommissionReviewCandidates(organizationContext.organizationId) : Promise.resolve([]),
   ]);
   const previewData = loadLedger ? await withTenantTransaction(organizationContext, async (db) => {
     const previewBatch = previewBatchId
@@ -334,8 +360,87 @@ export default async function DataQualityPage({
     .sort((left, right) => Number(right.year) - Number(left.year));
   const openRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status === "PENDING");
   const closedRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status !== "PENDING");
-  const openLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status === "OPEN");
-  const closedLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status !== "OPEN");
+  const openLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status === "OPEN" || issue.status === "PENDING");
+  const closedLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status !== "OPEN" && issue.status !== "PENDING");
+  const reviewInboxItems: ReviewInboxItem[] = [
+    ...premiumReconciliationReviews.map((review) => ({
+      id: review.id,
+      category: "Prima" as const,
+      subject: review.recordLabel,
+      clientName: review.clientName,
+      insurerName: review.insurerName,
+      reason: `${review.kind === "POLICY" ? "La prima de la póliza" : "La prima del endoso"} es ${formatCurrencyExact(review.expectedTotal, review.currency)} y sus recibos suman ${formatCurrencyExact(review.receiptTotal, review.currency)}. Diferencia: ${formatCurrencyExact(review.difference, review.currency)}.`,
+      amount: review.difference,
+      currency: review.currency,
+      updatedAt: review.updatedAt,
+      href: `/policies/${review.policyId}`,
+      actionLabel: "Abrir póliza",
+    })),
+    ...receiptReviewIssues
+      .filter((issue) => (issue.status === "OPEN" || issue.status === "PENDING") && !issue.suppressedByRuleId && !issue.duplicateOfId)
+      .map((issue) => ({
+        id: `receipt:${issue.issueId}`,
+        category: "Pagos" as const,
+        subject: `${issue.policyNumber} · Recibo ${issue.receiptNumber}`,
+        clientName: issue.clientName,
+        insurerName: issue.insurerName,
+        reason: displayReviewReason(issue.reason),
+        amount: issue.amount,
+        currency: issue.currency,
+        updatedAt: issue.createdAt,
+        href: `/data-quality?tab=pagos&q=${encodeURIComponent(issue.receiptNumber)}`,
+        actionLabel: "Revisar pago",
+      })),
+    ...commissionReviewCandidates
+      .filter((candidate) => !candidate.reason?.toLowerCase().startsWith("la prima no concilia con los recibos vigentes"))
+      .map((candidate) => ({
+        id: `commission:${candidate.receiptId}`,
+        category: "Comisiones" as const,
+        subject: `${candidate.policyNumber} · Recibo ${candidate.receiptNumber}`,
+        clientName: candidate.clientName,
+        insurerName: candidate.insurerName,
+        reason: candidate.reason || "La comisión de este recibo está pendiente de cálculo.",
+        amount: candidate.amount,
+        currency: candidate.currency,
+        updatedAt: candidate.updatedAt,
+        href: `/commissions?q=${encodeURIComponent(candidate.policyNumber)}`,
+        actionLabel: "Abrir comisiones",
+      })),
+    ...openRenewalSuggestions
+      .filter((suggestion) => !suggestion.suppressedByRuleId && !suggestion.duplicateOfId)
+      .map((suggestion) => ({
+        id: `renewal:${suggestion.suggestionId}`,
+        category: "Renovaciones" as const,
+        subject: suggestion.sourcePolicyNumber,
+        clientName: suggestion.clientName,
+        insurerName: suggestion.insurerName,
+        reason: suggestion.reason ? displayReviewReason(suggestion.reason) : "Confirma si esta póliza tiene una renovación vinculada.",
+        amount: null,
+        currency: null,
+        updatedAt: suggestion.updatedAt,
+        href: `/data-quality?tab=renovaciones&q=${encodeURIComponent(suggestion.sourcePolicyNumber)}`,
+        actionLabel: "Revisar renovación",
+      })),
+    ...openLedgerIssues
+      .filter((issue) => !issue.suppressedByRuleId && !issue.duplicateOfId)
+      .map((issue) => ({
+        id: `ledger:${issue.issueId}`,
+        category: "Ledger" as const,
+        subject: issue.sourceKey || issue.batchCsvName,
+        clientName: "—",
+        insurerName: "—",
+        reason: issue.message,
+        amount: null,
+        currency: null,
+        updatedAt: issue.createdAt,
+        href: `/data-quality?tab=ledger&ledgerBatch=${encodeURIComponent(issue.batchId)}`,
+        actionLabel: "Revisar ledger",
+      })),
+  ];
+  const filteredReviewInboxItems = reviewInboxItems
+    .filter((item) => matchesTableQuery(query, item.category, item.subject, item.clientName, item.insurerName, item.reason))
+    .sort((left, right) => left.updatedAt.getTime() - right.updatedAt.getTime() || left.category.localeCompare(right.category));
+  const pagedReviewInboxItems = filteredReviewInboxItems.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
   const filteredOpenRenewalSuggestions = openRenewalSuggestions.filter((suggestion) =>
     matchesTableQuery(
       query,
@@ -443,7 +548,7 @@ export default async function DataQualityPage({
         <PageHeader
           eyebrow="Calidad"
           title="Calidad de datos"
-          description="Cada categoría abre su propia revisión: salud operativa, vigencias, pagos, renovaciones y ledger."
+          description="Encuentra primero los pendientes que requieren atención y abre cada categoría para revisar sus detalles."
           actions={
             <>
               <RefreshPageButton />
@@ -459,6 +564,9 @@ export default async function DataQualityPage({
 
         <UrlTabs defaultValue={initialTab} className="space-y-6">
           <TabsList className="bg-card/70 p-1">
+            <TabsTrigger value="revisiones" className="px-4">
+              Revisiones
+            </TabsTrigger>
             <TabsTrigger value="salud" className="px-4">
               Salud
             </TabsTrigger>
@@ -475,6 +583,74 @@ export default async function DataQualityPage({
               Ledger
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="revisiones" className="space-y-6">
+            <SectionCard
+              title={`Pendientes por revisar (${filteredReviewInboxItems.length})`}
+              description="Casos abiertos de primas, pagos, comisiones, renovaciones y ledger. Abrir un caso te lleva al registro y a su flujo de revisión."
+            >
+              <div className="space-y-4 p-4">
+                <TableToolbar searchPlaceholder="Buscar póliza, cliente, aseguradora o motivo..." />
+                {filteredReviewInboxItems.length === 0 ? (
+                  <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-4 py-6 text-sm">
+                    <p className="font-medium">No hay pendientes abiertos.</p>
+                    <p className="mt-1 text-muted-foreground">Las diferencias de hasta $1.00 se consideran conciliadas.</p>
+                  </div>
+                ) : pagedReviewInboxItems.length === 0 ? (
+                  <div className="px-2 py-6 text-sm text-muted-foreground">
+                    Esta página no tiene resultados. <Link className="font-medium text-primary hover:underline" href={buildTableHref("/data-quality", params, { tab: "revisiones", q: query || null, page: null })}>Volver a la primera página</Link>.
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto rounded-lg border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-muted/40">
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Póliza / registro</TableHead>
+                            <TableHead>Cliente y aseguradora</TableHead>
+                            <TableHead>Qué revisar</TableHead>
+                            <TableHead className="text-right">Diferencia / importe</TableHead>
+                            <TableHead>Desde</TableHead>
+                            <TableHead className="text-right">Acción</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pagedReviewInboxItems.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell><Badge variant="outline">{item.category}</Badge></TableCell>
+                              <TableCell className="font-medium">{item.subject}</TableCell>
+                              <TableCell className="min-w-48">
+                                <p>{item.clientName}</p>
+                                <p className="text-xs text-muted-foreground">{item.insurerName}</p>
+                              </TableCell>
+                              <TableCell className="max-w-md whitespace-normal text-sm">{item.reason}</TableCell>
+                              <TableCell className="whitespace-nowrap text-right">
+                                {item.amount === null || !item.currency ? "—" : formatCurrencyExact(item.amount, item.currency)}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">{formatDate(item.updatedAt)}</TableCell>
+                              <TableCell className="text-right">
+                                <Button asChild size="sm" variant="outline">
+                                  <Link href={item.href}>{item.actionLabel}<ArrowRight className="ml-2 size-4" /></Link>
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <Pagination
+                      page={page}
+                      pageSize={DEFAULT_PAGE_SIZE}
+                      total={filteredReviewInboxItems.length}
+                      basePath="/data-quality"
+                      searchParams={{ tab: "revisiones", q: query || undefined }}
+                    />
+                  </>
+                )}
+              </div>
+            </SectionCard>
+          </TabsContent>
 
           <TabsContent value="salud" className="space-y-6">
             <SectionCard
