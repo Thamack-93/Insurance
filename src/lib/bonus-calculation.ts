@@ -115,6 +115,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       discountAmount: receipt.discountAmount === null ? null : n(receipt.discountAmount),
       premiumBreakdownByUnit: breakdown.length ? breakdown : null,
     });
+    const netPremiumFromUnitBreakdown = calculatedNet !== null && breakdown.length > 0;
     const currencyMismatch = receiptPayments.some((payment) => payment.currency.toUpperCase() !== receipt.currency.toUpperCase());
     const relevantReconciliation = receipt.endorsementId
       ? endorsementReconciliation.get(receipt.endorsementId)
@@ -157,6 +158,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       }
       if (!policy.bonusSellerId && evidence.sellerAttributionConfirmed !== true) reasons.push("Atribución provisional: confirmar vendedor histórico con sellerAttributionConfirmed=true.");
       if (calculatedNet === null) reasons.push("Falta el desglose completo del recibo para calcular prima neta.");
+      if (netPremiumFromUnitBreakdown) reasons.push("PNP derivada del desglose por unidad; validar contra el recibo individual antes de aprobar.");
       if (overpaid) reasons.push("Los pagos POSTED exceden el importe del recibo; revisar la aplicación antes de prorratear.");
       let conversion: ReturnType<typeof convertMoneyValue> | null = null;
       if (netPaid !== null) {
@@ -176,7 +178,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
         netPremiumPaid: netPaid?.toFixed(2) ?? null, eligibleAmount: amount?.toFixed(2) ?? null,
         conversionRate: conversion?.conversionRate ?? null, conversionDate: conversion?.conversionDate ?? null,
         reason: reasons.join(" ") || null,
-        evidence: { paidDate: payment.paidDate.toISOString(), insurer: policy.insurer.name, policyType: policy.policyType, sellerId: policy.bonusSellerId ?? policy.client.portfolioOwnerId, ruleEvidence: evidenceCheck.data },
+        evidence: { paidDate: payment.paidDate.toISOString(), insurer: policy.insurer.name, policyType: policy.policyType, sellerId: policy.bonusSellerId ?? policy.client.portfolioOwnerId, netPremiumSource: netPremiumFromUnitBreakdown ? "UNIT_BREAKDOWN_REVIEW" : calculatedNet === null ? null : "RECEIPT_COMPONENTS", ruleEvidence: evidenceCheck.data },
       });
     }
   }
