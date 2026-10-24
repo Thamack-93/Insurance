@@ -37,4 +37,11 @@ describe("shared receipt premium breakdown", () => {
       { amount: 40, status: "PENDING" }, { amount: 60, status: "PAID" }, { amount: 20, status: "CANCELLED" },
     ])).toMatchObject({ receiptTotal: 100, difference: 0, status: "RECONCILED" });
   });
+
+  it("accepts premium reconciliation differences up to one peso and reviews larger differences", () => {
+    expect(reconcilePolicyReceiptPremium(101, [{ amount: 100, status: "PAID" }])).toMatchObject({ difference: 1, status: "RECONCILED" });
+    expect(reconcilePolicyReceiptPremium(101.01, [{ amount: 100, status: "PAID" }])).toMatchObject({ difference: 1.01, status: "REVIEW" });
+    expect(reconcileEndorsementReceiptPremium(101, [{ amount: 100, status: "PAID" }])).toMatchObject({ difference: 1, status: "RECONCILED" });
+    expect(reconcileEndorsementReceiptPremium(101.01, [{ amount: 100, status: "PAID" }])).toMatchObject({ difference: 1.01, status: "REVIEW" });
+  });
 });

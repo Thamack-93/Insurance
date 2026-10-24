@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { BadgeCheck, CircleAlert, HandCoins, TrendingUp } from "@/components/icons";
+import { ArrowRight, BadgeCheck, CircleAlert, HandCoins, TrendingUp } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -27,6 +27,7 @@ import { businessAddDays } from "@/lib/business-dates";
 import { allocatePaidNetPremium, deriveReceiptNetPremium, type UnitPremiumBreakdown } from "@/lib/premium-breakdown";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
+import { summarizeCommissionReportRows } from "@/lib/commission-report";
 
 function parseReportDate(value: string | undefined) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -248,15 +249,23 @@ export default async function CommissionsPage({
     const expectedCommission = calculated ? allocation?.expectedCommission ?? null : null;
     return { payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status: calculated ? "CALCULATED" as const : "REVIEW" as const, reason: reasons.join(" "), reasonList: reasons };
   });
-  const totalsByCurrency = new Map<string, { premiumPaid: number; commissionExpected: number }>();
-  for (const row of reportRows) {
-    const currency = row.payment.currency;
-    const total = totalsByCurrency.get(currency) ?? { premiumPaid: 0, commissionExpected: 0 };
-    total.premiumPaid += row.amount;
-    if (row.expectedCommission !== null) total.commissionExpected += row.expectedCommission;
-    totalsByCurrency.set(currency, total);
-  }
+  const reportSummary = summarizeCommissionReportRows(reportRows.map((row) => ({
+    status: row.status,
+    currency: row.payment.currency,
+    amount: row.amount,
+    expectedCommission: row.expectedCommission,
+  })));
+  const totalsByCurrency = reportSummary.premiumByCurrency;
   const paidCount = stats.statusBreakdown.find(({ status }) => status === "PAID")?.count ?? 0;
+  const reviewReportCount = reportSummary.pendingCount;
+  const calculatedReportCount = reportSummary.calculatedCount;
+  const commissionTotalsByCurrency = [...reportSummary.commissionByCurrency.entries()]
+    .map(([currency, totals]) => `${formatCurrencyExact(totals.commissionExpected, currency)} ${currency}`);
+  const commissionReportTotal = reviewReportCount > 0 && calculatedReportCount === 0
+    ? "Pendiente de cálculo"
+    : reviewReportCount > 0
+      ? `${commissionTotalsByCurrency.join(" · ") || "Sin importe calculado"} · pendiente en ${reviewReportCount} pago(s)`
+      : commissionTotalsByCurrency.join(" · ") || "Sin comisión calculada";
 
   return (
     <div className="flex flex-col gap-6">
@@ -275,38 +284,44 @@ export default async function CommissionsPage({
           </div>
         </div>
 
-        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold">Comisiones registradas</h2>
+            <p className="text-xs text-muted-foreground">Saldos de comisiones guardadas; estos indicadores son independientes del reporte por periodo.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
-            title="Esperado"
+            title="Esperado registrado"
             value={formatCurrency(stats.totalExpected)}
             description="Suma de comisiones registradas."
             icon={HandCoins}
             tone="emerald"
           />
           <MetricCard
-            title="Cobrado"
+            title="Cobrado registrado"
             value={formatCurrency(stats.totalActual)}
             description={`${ratio}% de conversión sobre lo esperado`}
             icon={TrendingUp}
             tone="blue"
           />
           <MetricCard
-            title="Abiertas"
+            title="Abiertas registradas"
             value={stats.totalCount - paidCount}
             description="Todavía en espera de liquidación."
             icon={BadgeCheck}
             tone="amber"
           />
           <MetricCard
-            title="Vencidas"
+            title="Vencidas registradas"
             value={overdueCommissions.length}
             description="Esperadas en el pasado sin cierre."
             icon={CircleAlert}
             tone="rose"
           />
+          </div>
         </section>
 
-        <SectionCard title="Generar reporte de comisiones" description="El periodo usa la fecha de pago de la prima por el cliente. Se incluyen pagos POSTED y se excluyen los revertidos.">
+        <SectionCard title="Reporte de comisiones por periodo" description="El periodo se determina por la fecha en que el cliente pagó la prima. Solo se incluyen pagos confirmados.">
           {scope.membershipRole === "AGENT" ? <p className="border-b px-4 py-3 text-sm text-muted-foreground">Puedes consultar los pagos y comisiones de tu cartera. Solo Owner o Admin puede calcular las comisiones faltantes.</p> : (
             <form action={generateCommissionReport} className="flex flex-wrap items-end gap-3 border-b px-4 py-4">
               <label className="grid gap-1 text-sm">Desde<input required type="date" name="paidFrom" defaultValue={params.paidFrom} className="h-10 rounded-md border bg-background px-3" /></label>
@@ -314,12 +329,21 @@ export default async function CommissionsPage({
               <Button type="submit">Calcular y generar reporte</Button>
             </form>
           )}
-          <p className="px-4 py-3 text-xs text-muted-foreground">Prima neta del recibo = importe − IVA − expedición − recargo fraccionado + descuentos visibles. Prima neta pagada = prima neta × pago POSTED / importe del recibo; la comisión calculada del recibo se distribuye con esa misma proporción. Los faltantes de regla, desglose, conciliación o duplicidad quedan en revisión.</p>
-          {params.generated === "1" ? <p className="border-b px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">Periodo procesado. Revisa las partidas marcadas antes de usar el reporte.</p> : null}
+          <details className="border-b px-4 py-3 text-xs text-muted-foreground">
+            <summary className="w-fit cursor-pointer font-medium text-foreground">Cómo se calcula</summary>
+            <p className="mt-2 max-w-4xl">Se parte del importe del recibo, se restan IVA, expedición y recargo, y se suman los descuentos capturados. Después se asigna al pago la parte proporcional de prima neta y comisión. Si falta un dato, una regla o una conciliación supera $1.00, el pago queda pendiente de revisión.</p>
+          </details>
+          {params.generated === "1" ? <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-sm"><p className="text-emerald-700 dark:text-emerald-300">Reporte generado. Los pagos pendientes aún no tienen una comisión calculada.</p><Button asChild size="sm" variant="outline"><Link href="/data-quality?tab=revisiones">Ver pendientes de revisión<ArrowRight className="ml-2 size-4" /></Link></Button></div> : null}
           {params.paidFrom || params.paidTo ? validPaidRange ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                <p className="text-sm">{reportRows.length} pago(s) del cliente · {reportRows.filter((row) => row.status === "REVIEW").length} en revisión · {totalsByCurrency.size ? [...totalsByCurrency.entries()].map(([currency, totals]) => `Prima pagada ${formatCurrencyExact(totals.premiumPaid, currency)} · Comisión estimada ${formatCurrencyExact(totals.commissionExpected, currency)}`).join("; ") : "Sin pagos en el periodo"}</p>
+                <div className="grid w-full gap-3 rounded-lg border bg-muted/20 p-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                  <p><span className="block text-xs text-muted-foreground">Pagos del periodo</span><span className="font-medium">{reportRows.length}</span></p>
+                  <p><span className="block text-xs text-muted-foreground">Calculados</span><span className="font-medium">{calculatedReportCount}</span></p>
+                  <p><span className="block text-xs text-muted-foreground">Pendientes de revisión</span><span className="font-medium">{reviewReportCount}</span></p>
+                  <p><span className="block text-xs text-muted-foreground">Comisión del reporte</span><span className="font-medium">{commissionReportTotal}</span></p>
+                  <p className="sm:col-span-2 xl:col-span-4"><span className="text-xs text-muted-foreground">Prima pagada: </span>{totalsByCurrency.size ? [...totalsByCurrency.entries()].map(([currency, totals]) => `${formatCurrencyExact(totals.premiumPaid, currency)} ${currency}`).join(" · ") : "Sin pagos en el periodo"}</p>
+                </div>
                 <ExportButtons exports={[{ name: "Comisiones por pago", data: reportRows.map(({ payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status, reason }) => ({
                   "Fecha de pago del cliente": payment.paidDate.toISOString().slice(0, 10),
                   "Referencia de pago": payment.reference ?? "",
@@ -337,25 +361,23 @@ export default async function CommissionsPage({
                   "Motivo": reason,
                 })) }]} />
               </div>
-              {reportRows.length ? <>
-                <p className="px-4 pb-2 text-xs text-muted-foreground">Desplaza la tabla horizontalmente para consultar todas las columnas. Abre “Revisión” para ver el detalle del dato pendiente.</p>
-                <Table className="min-w-[1340px] table-fixed">
+              {reportRows.length ? <div className="overflow-x-auto">
+                <Table className="min-w-[900px]">
                   <TableHeader><TableRow className="bg-muted/40">
-                    <TableHead className="w-[120px]">Pago cliente</TableHead><TableHead className="w-[130px]">Póliza / recibo</TableHead><TableHead className="w-[175px]">Cliente</TableHead><TableHead className="w-[180px]">Aseguradora</TableHead><TableHead className="w-[130px] text-right">Prima pagada</TableHead><TableHead className="w-[140px] text-right">Prima neta pagada</TableHead><TableHead className="w-[75px] text-right">Tasa</TableHead><TableHead className="w-[150px] text-right">Comisión estimada</TableHead><TableHead className="w-[240px]">Estado / revisión</TableHead>
+                    <TableHead>Fecha</TableHead><TableHead>Póliza / recibo</TableHead><TableHead>Cliente / aseguradora</TableHead><TableHead className="text-right">Prima pagada / neta</TableHead><TableHead className="text-right">Comisión calculada</TableHead><TableHead>Estado y motivo</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>{reportRows.map(({ payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status, reasonList }) => <TableRow key={payment.id}>
                     <TableCell className="whitespace-nowrap">{formatDate(payment.paidDate)}</TableCell>
-                    <TableCell className="truncate"><Link href={`/policies/${payment.policyId}`} className="font-medium hover:text-primary">{payment.policy.policyNumber}</Link><p className="truncate text-xs text-muted-foreground">{receipt.receiptNumber}</p></TableCell>
-                    <TableCell className="truncate" title={payment.client.fullName}>{payment.client.fullName}</TableCell><TableCell className="truncate" title={payment.policy.insurer.name}>{payment.policy.insurer.name}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">{formatCurrencyExact(amount, payment.currency)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">{allocatedNetPremium === null ? "—" : formatCurrencyExact(allocatedNetPremium, payment.currency)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">
-                      {commission?.percentage === null || commission?.percentage === undefined ? "—" : <span>{toNumber(commission.percentage).toFixed(2)}%<span className="block text-xs font-normal text-muted-foreground">{commissionRateSourceLabel(commission)}</span></span>}
+                    <TableCell><Link href={`/policies/${payment.policyId}`} className="font-medium hover:text-primary">{payment.policy.policyNumber}</Link><p className="text-xs text-muted-foreground">{receipt.receiptNumber}</p></TableCell>
+                    <TableCell className="min-w-48">{payment.client.fullName}<p className="text-xs text-muted-foreground">{payment.policy.insurer.name}</p></TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">{formatCurrencyExact(amount, payment.currency)}<p className="text-xs text-muted-foreground">Neta: {allocatedNetPremium === null ? "pendiente" : formatCurrencyExact(allocatedNetPremium, payment.currency)}</p></TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">
+                      {expectedCommission === null ? "Pendiente" : formatCurrencyExact(expectedCommission, payment.currency)}
+                      {commission?.percentage !== null && commission?.percentage !== undefined ? <p className="text-xs font-normal text-muted-foreground">Tasa {toNumber(commission.percentage).toFixed(2)}% · {commissionRateSourceLabel(commission)}</p> : null}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">{expectedCommission === null ? "—" : formatCurrencyExact(expectedCommission, payment.currency)}</TableCell>
-                    <TableCell className="text-xs">{status === "CALCULATED" ? <StatusBadge status="EXPECTED" entity="commission" /> : <details className="group">
+                    <TableCell className="max-w-xs whitespace-normal text-xs">{status === "CALCULATED" ? <StatusBadge status="EXPECTED" entity="commission" /> : <details className="group">
                       <summary className="inline-flex cursor-pointer list-none items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950">
-                        Revisión{reasonList.length > 1 ? ` · ${reasonList.length} pendientes` : " · Ver motivo"}
+                        Pendiente{reasonList.length > 1 ? ` · ${reasonList.length} motivos` : " · Ver motivo"}
                       </summary>
                       <div className="mt-2 max-w-[230px] space-y-1.5 whitespace-normal rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
                         {reasonList.map((item, index) => <p key={`${payment.id}-reason-${index}`}>{item}</p>)}
@@ -363,7 +385,7 @@ export default async function CommissionsPage({
                     </details>}</TableCell>
                   </TableRow>)}</TableBody>
                 </Table>
-              </> : <p className="px-4 py-8 text-center text-sm text-muted-foreground">No hay pagos de prima POSTED dentro de ese periodo.</p>}
+              </div> : <p className="px-4 py-8 text-center text-sm text-muted-foreground">No hay pagos de prima POSTED dentro de ese periodo.</p>}
             </>
           ) : <p className="px-4 py-4 text-sm text-amber-700 dark:text-amber-300">Ingresa fechas válidas y asegúrate de que “Desde” no sea posterior a “Hasta”.</p> : <p className="px-4 py-4 text-sm text-muted-foreground">Elige el periodo que quieres consultar. Al generarlo, el sistema calcula las comisiones faltantes y muestra cada pago del cliente.</p>}
         </SectionCard>

@@ -276,7 +276,12 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
           <MetricCard
             title="Prima"
             value={formatCurrency(policy.premiumAmount, policy.currency)}
-            description={frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}
+            description={premiumReconciliation.status === "REVIEW" ? (
+              <>
+                Requiere revisión · diferencia {formatCurrency(premiumReconciliation.difference, policy.currency)}
+                {isAdmin ? <span> · <Link className="font-medium text-primary hover:underline" href={`/data-quality?tab=revisiones&q=${encodeURIComponent(policy.policyNumber)}`}>Ver en Revisiones</Link></span> : null}
+              </>
+            ) : frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}
             icon={Shield}
             tone="emerald"
           />
@@ -316,14 +321,6 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
             tone="rose"
           />
         </section>
-
-        <div className={`rounded-xl border px-4 py-3 text-sm ${premiumReconciliation.status === "RECONCILED" ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/40 bg-amber-500/5"}`}>
-          <p className="font-medium">Conciliación de prima {premiumReconciliation.status === "RECONCILED" ? "correcta" : "requiere revisión"}</p>
-          <p className="mt-1 text-muted-foreground">
-            Prima de póliza {formatCurrency(premiumReconciliation.expectedTotal, policy.currency)} · recibos base vigentes {formatCurrency(premiumReconciliation.receiptTotal, policy.currency)} · diferencia {formatCurrency(premiumReconciliation.difference, policy.currency)}.
-            {" "}Los recibos de endoso se concilian contra cada endoso por separado.
-          </p>
-        </div>
 
         <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <SectionCard title="Póliza base" description="Contexto operativo y comercial de la vigencia base.">
