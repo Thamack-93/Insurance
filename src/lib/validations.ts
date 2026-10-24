@@ -20,12 +20,13 @@ const optionalEmail = z.string().email("Email invalido.").optional().or(z.litera
 const requiredDate = z.string().min(1, "Selecciona una fecha.");
 const optionalDate = z.string().optional().or(z.literal(""));
 const commissionMoney = z.union([z.literal(""), z.coerce.number().nonnegative("El importe no puede ser negativo.")]).optional();
+const commissionSurchargeMoney = z.union([z.literal(""), z.coerce.number().finite("Escribe un importe válido.")]).optional();
 const receiptCommissionUnitSchema = z.object({
   insuredAssetId: z.string().min(1),
   totalPremium: commissionMoney,
   vatAmount: commissionMoney,
   issuanceExpenseAmount: commissionMoney,
-  surchargeAmount: commissionMoney,
+  surchargeAmount: commissionSurchargeMoney,
   discountAmount: commissionMoney,
 });
 
@@ -164,7 +165,7 @@ export const receiptSchema = z
     amount: z.coerce.number().positive("El monto debe ser mayor a cero."),
     vatAmount: commissionMoney,
     issuanceExpenseAmount: commissionMoney,
-    surchargeAmount: commissionMoney,
+    surchargeAmount: commissionSurchargeMoney,
     discountAmount: commissionMoney,
     premiumBreakdownByUnit: z.array(receiptCommissionUnitSchema).max(100).default([]),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
