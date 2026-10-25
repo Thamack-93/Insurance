@@ -24,6 +24,16 @@ integrados en `main`.
 - El HTML inicial indica que el flujo es para pólizas individuales dentro de la vigencia del recibo y no muestra todavía el formulario de correo ni la acción final.
 - Se observaron recursos/cookies de Incapsula. No se ha determinado si el flujo normal dispara un challenge.
 
+## Revalidación del portal (2026-10-25)
+
+- La página pública vuelve a mostrar `numPoliza` y el botón `Buscar`, pero el navegador los expone dentro del componente `form-consulta-poliza`; no aparecen como un formulario accesible con método y acción.
+- Una consulta manual de sólo lectura llegó a la vista de póliza y recibos; no se avanzó al formulario de contacto ni se envió una liga.
+- En producción, la solicitud de liga terminó en `PROVIDER_FLOW_CHANGED` después del `GET` inicial y antes del evento `policy_lookup`; la captura posterior del navegador identificó el contrato AJAX que ejecuta `Buscar`.
+- Captura de red autorizada en Chrome (2026-10-25): `Buscar` envía `POST` XHR al portlet `pagopoliza_WAR_PagoPolizaportlet`, acción `consulta-datos`, `p_p_lifecycle=1`, `p_p_state=normal`, `p_p_mode=view` y `p_auth` dinámico. Usa `multipart/form-data`, `X-Pjax: true` y `X-Requested-With: XMLHttpRequest`; el cuerpo contiene `numPoliza` y un control oculto dinámico. La respuesta fue HTTP 200 HTML.
+- La respuesta de sólo lectura mostró un recibo pendiente. No se avanzó a `Pagar ahora`, no se ingresó un destinatario y no se envió una liga.
+- Los valores de póliza, `p_auth`, cookies y del control oculto no se conservan. El adaptador local ahora resuelve el portlet sin exigir un `<form>` nativo, recoge controles del contenedor Quálitas y usa el envío multipart AJAX observado; mantiene el cierre seguro si no encuentra el token o los campos dinámicos.
+- La consulta manual de recibos registra etapa, resultado y estructura del control detectado, sin guardar HTML, póliza, cookies, tokens ni datos de contacto.
+
 ## Flujo visual autorizado observado
 
 - Una póliza válida avanza a `/web/qmx/pago-de-poliza/-/user-pago/pago-tdc`.
@@ -47,7 +57,7 @@ La segunda ejecución controlada se hizo con DevTools Network y `Preserve log` a
 - Se observaron cookies de sesión y de protección del proveedor; sólo se manejan en memoria por ejecución y no se guardan ni se registran. No apareció CAPTCHA ni challenge durante esta captura.
 - El tiempo observado del envío final fue aproximadamente 8.8 segundos. El timeout del adaptador es acotado y configurable.
 
-La consulta de póliza conserva la evidencia estática del formulario inicial: `POST` con acción `consulta-datos`, `numPoliza`, campos ocultos dinámicos y `p_auth` dinámico. La respuesta válida muestra los datos y recibos y un botón JavaScript `Pagar ahora`, que navega por `GET` a `/web/qmx/pago-de-poliza/-/user-pago/pago-tdc`; sólo después aparece el formulario de contacto.
+La consulta de póliza usa la solicitud AJAX `POST` observada a `consulta-datos`, con `numPoliza`, controles ocultos dinámicos y `p_auth` dinámico. La respuesta válida muestra los datos y recibos y un botón JavaScript `Pagar ahora`, que navega por `GET` a `/web/qmx/pago-de-poliza/-/user-pago/pago-tdc`; sólo después aparece el formulario de contacto.
 
 ## Diferencia Email vs. WhatsApp
 
