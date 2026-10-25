@@ -114,7 +114,12 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
   ] = await Promise.all([
     db.receipt.findMany({
       where: { policyId: id, organizationId: scope.organizationId, endorsementId: null },
-      include: { client: true, insurer: true, endorsement: true },
+      include: {
+        client: true,
+        insurer: true,
+        endorsement: true,
+        payments: { where: { organizationId: scope.organizationId, status: "POSTED" }, select: { id: true } },
+      },
       orderBy: [
         { periodStartDate: "asc" },
         { periodEndDate: "asc" },
@@ -225,9 +230,14 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
     currency: receipt.currency,
   }));
   const premiumReconciliation = reconcilePolicyReceiptPremium(Number(policy.premiumAmount), receipts.map((receipt) => ({
+    id: receipt.id,
     amount: toNumber(receipt.amount),
     status: receipt.status,
+    receiptSequence: receipt.receiptSequence,
     endorsementId: receipt.endorsementId,
+    cancelledAt: receipt.cancelledAt,
+    cancellationReason: receipt.cancellationReason,
+    postedPaymentCount: receipt.payments.length,
   })));
   const activeEndorsements = endorsements.filter((endorsement) => endorsement.status === "ACTIVE");
   const expiredEndorsements = endorsements.filter((endorsement) => endorsement.status === "EXPIRED");

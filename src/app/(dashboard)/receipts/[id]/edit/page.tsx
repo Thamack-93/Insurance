@@ -8,6 +8,7 @@ import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ReceiptFormValues } from "@/lib/validations";
 import { getPolicyOptionLabel } from "@/lib/policy-identity";
+import type { SelectOption } from "@/lib/domain-options";
 import { endorsementOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
@@ -49,10 +50,10 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
         });
     const endorsements = await db.policyEndorsement.findMany({
       where: {
-        policyId: receipt.policyId,
+        policyId: { in: policies.map((policy) => policy.id) },
         ...endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
       },
-      select: { id: true, endorsementNumber: true, reference: true },
+      select: { id: true, policyId: true, endorsementNumber: true, reference: true },
       orderBy: { endorsementNumber: "asc" },
     });
     return { receipt, policies, endorsements };
@@ -62,10 +63,15 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
     notFound();
   }
 
-  const endorsementOptions = endorsements.map((endorsement) => ({
-    value: endorsement.id,
-    label: `${endorsement.endorsementNumber} · ${endorsement.reference ?? "Sin referencia"}`,
-  }));
+  const endorsementOptionsByPolicy = endorsements.reduce<Record<string, SelectOption[]>>((optionsByPolicy, endorsement) => {
+    const options = optionsByPolicy[endorsement.policyId] ?? [];
+    options.push({
+      value: endorsement.id,
+      label: `${endorsement.endorsementNumber} · ${endorsement.reference ?? "Sin referencia"}`,
+    });
+    optionsByPolicy[endorsement.policyId] = options;
+    return optionsByPolicy;
+  }, {});
 
   return (
     <div className="flex flex-col gap-6">
@@ -105,7 +111,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             label: getPolicyOptionLabel(policy, [policy.client.fullName]),
           }))}
           policyAssets={Object.fromEntries(policies.map((policy) => [policy.id, policy.insuredAssets]))}
-          endorsementOptions={endorsementOptions}
+          endorsementOptionsByPolicy={endorsementOptionsByPolicy}
           submitAction={updateReceipt.bind(null, receipt.id)}
           footerActions={
             <CancelReceiptOnlyButton
