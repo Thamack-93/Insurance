@@ -68,6 +68,10 @@ export function ReceiptForm({
     defaultValues,
   });
   const selectedPolicyId = useWatch({ control, name: "policyId" });
+  const vatAmount = useWatch({ control, name: "vatAmount" });
+  const issuanceExpenseAmount = useWatch({ control, name: "issuanceExpenseAmount" });
+  const surchargeAmount = useWatch({ control, name: "surchargeAmount" });
+  const discountAmount = useWatch({ control, name: "discountAmount" });
   const selectedAssets = useMemo(() => selectedPolicyId ? policyAssets[selectedPolicyId] ?? [] : [], [selectedPolicyId, policyAssets]);
 
   useEffect(() => {
@@ -108,7 +112,7 @@ export function ReceiptForm({
       const saved = existing.get(asset.id);
       return saved ?? { insuredAssetId: asset.id, totalPremium: "", vatAmount: "", issuanceExpenseAmount: "", surchargeAmount: "", discountAmount: "" };
     }));
-  }, [selectedPolicyId, selectedAssets, setValue, getValues]);
+  }, [selectedPolicyId, selectedAssets, vatAmount, issuanceExpenseAmount, surchargeAmount, discountAmount, setValue, getValues]);
 
   async function onSubmit(values: ReceiptFormValues) {
     startTransition(async () => {
