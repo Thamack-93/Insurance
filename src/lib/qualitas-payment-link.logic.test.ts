@@ -33,6 +33,13 @@ const initialHtml = `<form method="post" action="${policyAction.replaceAll("&", 
   <button type="submit">Buscar</button>
 </form>`;
 
+const ajaxInitialHtml = `<div id="p_p_id_pagopoliza_WAR_PagoPolizaportlet_"
+  data-consulta-url="https://www.qualitas.com.mx/web/qmx/pago-de-poliza?p_p_id=pagopoliza_WAR_PagoPolizaportlet&amp;p_p_lifecycle=1&amp;p_p_state=normal&amp;p_p_mode=view&amp;_pagopoliza_WAR_PagoPolizaportlet_myaction=consulta-datos&amp;p_auth=test-token">
+  <input type="hidden" name="dynamicField" value="dynamicValue">
+  <input name="numPoliza" maxlength="10">
+  <button id="consultaPol">Buscar</button>
+</div>`;
+
 const contactHtml = `<form method="post" action="${finalAction.replaceAll("&", "&amp;")}">
   <input type="hidden" name="resumenWSUrl" value="${resumeUrl}">
   <input type="hidden" name="numTelefono" value="">
@@ -96,6 +103,30 @@ describe("qualitas-payment-link provider", () => {
     expect(result).toEqual({ outcome: "OK", nextDueDate: "2026-11-12" });
     expect(calls).toHaveLength(3);
     expect(calls.map(({ init }) => init?.method ?? "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(calls.some(({ url }) => new URL(url).searchParams.get("_pagopoliza_WAR_PagoPolizaportlet_myaction") === "envia-link-pago")).toBe(false);
+  });
+
+  it("uses the observed Quálitas AJAX portlet lookup and keeps receipt checks read-only", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(ajaxInitialHtml, 200, { "set-cookie": "JSESSIONID=read-only-session; Path=/" }),
+      response(paymentPageHtml),
+      response(QUALITAS_RECEIPT_MONITOR_FIXTURES.NEXT_RECEIPT_TABLE),
+    ]);
+
+    const result = await lookupQualitasPendingReceipts("0000000000", { transport });
+
+    expect(result).toEqual({ outcome: "OK", nextDueDate: "2026-11-12" });
+    expect(calls).toHaveLength(3);
+    expect(calls.map(({ init }) => init?.method ?? "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(new URL(calls[1].url).searchParams.get("_pagopoliza_WAR_PagoPolizaportlet_myaction")).toBe("consulta-datos");
+    expect(new URL(calls[1].url).searchParams.get("p_auth")).toBe("test-token");
+    const lookupHeaders = new Headers(calls[1].init?.headers);
+    expect(lookupHeaders.get("X-Pjax")).toBe("true");
+    expect(lookupHeaders.get("X-Requested-With")).toBe("XMLHttpRequest");
+    const lookupBody = calls[1].init?.body as FormData;
+    expect(lookupBody).toBeInstanceOf(FormData);
+    expect(lookupBody.get("numPoliza")).toBe("0000000000");
+    expect(lookupBody.get("dynamicField")).toBe("dynamicValue");
     expect(calls.some(({ url }) => new URL(url).searchParams.get("_pagopoliza_WAR_PagoPolizaportlet_myaction") === "envia-link-pago")).toBe(false);
   });
 
