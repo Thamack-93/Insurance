@@ -1,9 +1,8 @@
 import "server-only";
 
 import { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { withSystemOrganizationTransaction } from "@/lib/organization-context";
+import { listOrganizationIdsForBonusRunRetention, withSystemOrganizationTransaction } from "@/lib/organization-context";
 
 // TODO(data-retention): Review this initial five-day retention period after
 // the bonus testing cycle. This intentionally covers every BonusRun status.
@@ -58,11 +57,10 @@ async function purgeOrganizationBatch(organizationId: string, cutoff: Date, now:
 
 /** Deletes all tenant bonus runs after five days from their last update. */
 export async function purgeExpiredBonusRuns(now = new Date()) {
-  const db = getDb();
   const cutoff = new Date(now.getTime() - BONUS_RUN_RETENTION_DAYS * DAY_MS);
   // Organization is the only global inventory read. Protected BonusRun reads
   // and writes are performed with one explicit tenant id in each transaction.
-  const organizations = await db.organization.findMany({ select: { id: true }, orderBy: { id: "asc" } });
+  const organizations = await listOrganizationIdsForBonusRunRetention();
   let purged = 0;
   let failedOrganizations = 0;
   let moreExpired = false;

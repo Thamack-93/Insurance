@@ -280,6 +280,11 @@ export async function withOrganizationTransaction<T>(
 export type TenantDb = Prisma.TransactionClient;
 export const withTenantTransaction = withOrganizationTransaction;
 
+/** Lists organization ids for platform maintenance jobs; each tenant query must still run in its own system transaction. */
+export async function listOrganizationIdsForBonusRunRetention(): Promise<Array<{ id: string }>> {
+  return getDb().organization.findMany({ select: { id: true }, orderBy: { id: "asc" } });
+}
+
 /**
  * Tenant transaction for platform jobs. Callers must enumerate organizations
  * explicitly and pass one concrete id; there is deliberately no global
