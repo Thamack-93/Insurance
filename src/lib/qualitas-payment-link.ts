@@ -61,6 +61,7 @@ export type QualitasReceiptLookupResult =
   | { outcome: "OK"; nextDueDate: string }
   | { outcome: "ALREADY_PAID" }
   | { outcome: "INCONCLUSIVE"; reason: "INVALID_INPUT" | "FLOW_CHANGED" | "PROVIDER_UNAVAILABLE" | "CHALLENGE" | "RECEIPT_DATE_NOT_FOUND" };
+type QualitasReceiptLookupReason = Extract<QualitasReceiptLookupResult, { outcome: "INCONCLUSIVE" }>["reason"];
 
 export type QualitasPreparedPaymentLink = {
   request: QualitasDeliveryRequest;
@@ -102,6 +103,11 @@ export type QualitasProviderEvent = {
   hasSuccessMessage?: boolean;
   hasDuplicateMessage?: boolean;
   hasPolicyForm?: boolean;
+  policyFormMethod?: "GET" | "POST" | "OTHER" | "MISSING";
+  policyActionAllowed?: boolean;
+  formCount?: number;
+  receiptLookupOutcome?: QualitasReceiptLookupResult["outcome"];
+  receiptLookupReason?: QualitasReceiptLookupReason;
   hasContactForm?: boolean;
   hasResumeMarker?: boolean;
   hasVisibleContactForm?: boolean;
@@ -399,6 +405,31 @@ function getForms(html: string) {
   return [...html.matchAll(/<form\b[^>]*>[\s\S]*?<\/form>/gi)].map((match) => match[0]);
 }
 
+function policyFormDiagnostics(html: string, baseUrl: string) {
+  const forms = getForms(html);
+  const policyForm = findFormContaining(html, "numPoliza");
+  const portlet = policyForm ? null : findQualitasPolicyPortlet(html);
+  const hasPolicyControl = Boolean(policyForm)
+    || Boolean(portlet && collectQualitasPolicyLookupFields(portlet).some((field) => field.name === "numPoliza"));
+  const action = policyForm
+    ? formAction(policyForm, baseUrl)
+    : portlet
+      ? findQualitasPolicyLookupAction(html, baseUrl)
+      : null;
+  const method = policyForm ? formMethod(policyForm) : portlet && action ? "POST" : null;
+  const policyFormMethod: QualitasProviderEvent["policyFormMethod"] = method === "GET" || method === "POST"
+    ? method
+    : method
+      ? "OTHER"
+      : "MISSING";
+  return {
+    hasPolicyForm: hasPolicyControl,
+    policyFormMethod,
+    policyActionAllowed: action ? isAllowedQualitasUrl(action) : false,
+    formCount: forms.length,
+  };
+}
+
 function elementAttribute(node: DefaultTreeAdapterTypes.Element, name: string) {
   return node.attrs.find((attribute) => attribute.name.toLowerCase() === name.toLowerCase())?.value ?? null;
 }
@@ -421,8 +452,14 @@ function visibleNodeTextContent(node: DefaultTreeAdapterTypes.Node): string {
 }
 
 function collectFormFields(form: string, options: { includeSubmitters?: boolean } = {}): QualitasFormField[] {
+  return collectFormFieldsFromRoot(parse(form), options);
+}
+
+function collectFormFieldsFromRoot(
+  root: DefaultTreeAdapterTypes.Node,
+  options: { includeSubmitters?: boolean } = {},
+): QualitasFormField[] {
   const fields: QualitasFormField[] = [];
-  const document = parse(form);
 
   function collect(node: DefaultTreeAdapterTypes.Node) {
     if ("tagName" in node) {
@@ -470,7 +507,44 @@ function collectFormFields(form: string, options: { includeSubmitters?: boolean 
     if ("childNodes" in node) for (const child of node.childNodes) collect(child);
   }
 
-  collect(document);
+  collect(root);
+  return fields;
+}
+
+function findQualitasPolicyPortlet(html: string) {
+  const document = parse(html);
+  let result: DefaultTreeAdapterTypes.Element | null = null;
+  function visit(node: DefaultTreeAdapterTypes.Node) {
+    if (result) return;
+    if ("tagName" in node && elementAttribute(node as DefaultTreeAdapterTypes.Element, "id") === "p_p_id_pagopoliza_WAR_PagoPolizaportlet_") {
+      result = node as DefaultTreeAdapterTypes.Element;
+      return;
+    }
+    if ("childNodes" in node) for (const child of node.childNodes) visit(child);
+  }
+  visit(document);
+  return result;
+}
+
+function collectQualitasPolicyLookupFields(root: DefaultTreeAdapterTypes.Node) {
+  const fields: QualitasFormField[] = [];
+  function visit(node: DefaultTreeAdapterTypes.Node) {
+    if ("tagName" in node) {
+      const element = node as DefaultTreeAdapterTypes.Element;
+      const name = elementAttribute(element, "name");
+      const type = (elementAttribute(element, "type") ?? "text").toLowerCase();
+      if (
+        element.tagName.toLowerCase() === "input"
+        && name
+        && !hasElementAttribute(element, "disabled")
+        && (name === "numPoliza" || type === "hidden")
+      ) {
+        fields.push({ name, value: elementAttribute(element, "value") ?? "", controlType: "input" });
+      }
+    }
+    if ("childNodes" in node) for (const child of node.childNodes) visit(child);
+  }
+  visit(root);
   return fields;
 }
 
@@ -724,6 +798,70 @@ function formMethod(form: string) {
   return (getAttribute(form.match(/<form\b([^>]*)>/i)?.[1] ?? "", "method") ?? "get").toUpperCase();
 }
 
+function decodeQualitasEmbeddedUrl(value: string) {
+  return decodeHtml(value)
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\\//g, "/")
+    .replace(/\\x26/gi, "&");
+}
+
+function findQualitasPolicyLookupAction(html: string, baseUrl: string) {
+  const candidates = [...html.matchAll(/(?:https?:\/\/www\.qualitas\.com\.mx)?\/web\/qmx\/pago-de-poliza(?:\?[^"'<>`\\\s]*)?/gi)]
+    .map((match) => decodeQualitasEmbeddedUrl(match[0]));
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate, baseUrl);
+      if (
+        isAllowedQualitasUrl(url)
+        && url.searchParams.get("p_p_id") === "pagopoliza_WAR_PagoPolizaportlet"
+        && url.searchParams.get("p_p_lifecycle") === "1"
+        && url.searchParams.get("_pagopoliza_WAR_PagoPolizaportlet_myaction") === "consulta-datos"
+        && Boolean(url.searchParams.get("p_auth"))
+      ) return url.toString();
+    } catch {
+      // Ignore unrelated or incomplete URLs embedded in the portal markup.
+    }
+  }
+
+  const authToken = html.match(/\bLiferay\.authToken\s*=\s*(["'])([^"']+)\1/i)?.[2]
+    ?? html.match(/(?:[?&]|%3[fF]|%26)p_auth(?:=|%3[dD])([^&"'\\\s<>]+)/i)?.[1];
+  if (!authToken) return null;
+  const url = new URL("/web/qmx/pago-de-poliza", baseUrl);
+  url.search = new URLSearchParams({
+    p_p_id: "pagopoliza_WAR_PagoPolizaportlet",
+    p_p_lifecycle: "1",
+    p_p_state: "normal",
+    p_p_mode: "view",
+    _pagopoliza_WAR_PagoPolizaportlet_myaction: "consulta-datos",
+    p_auth: decodeQualitasEmbeddedUrl(authToken),
+  }).toString();
+  return isAllowedQualitasUrl(url) ? url.toString() : null;
+}
+
+type QualitasPolicyLookupRequest = {
+  url: string;
+  fields: QualitasFormField[];
+  encoding: "FORM_URLENCODED" | "MULTIPART";
+};
+
+function findQualitasPolicyLookupRequest(html: string, baseUrl: string): QualitasPolicyLookupRequest | null {
+  const policyForm = findFormContaining(html, "numPoliza");
+  if (policyForm) {
+    if (formMethod(policyForm) !== "POST") return null;
+    const url = formAction(policyForm, baseUrl);
+    if (!url || !isAllowedQualitasUrl(url)) return null;
+    return { url, fields: collectFormFields(policyForm), encoding: "FORM_URLENCODED" };
+  }
+
+  const portlet = findQualitasPolicyPortlet(html);
+  const url = findQualitasPolicyLookupAction(html, baseUrl);
+  if (!portlet || !url) return null;
+  const fields = collectQualitasPolicyLookupFields(portlet);
+  const policyIndex = fields.findIndex((field) => field.name === "numPoliza");
+  if (policyIndex < 0 || fields.length < 2) return null;
+  return { url, fields, encoding: "MULTIPART" };
+}
+
 function setFormField(fields: QualitasFormField[], name: string, value: string) {
   const next = fields.map((field) => ({ ...field }));
   const index = next.findIndex((field) => field.name === name);
@@ -941,6 +1079,9 @@ async function requestWithSession(input: {
         continue;
       }
       const bodyText = await readBoundedResponseText(response, maxResponseBytes);
+      const structure = contentTypeFamily(response.headers.get("content-type")) === "html"
+        ? policyFormDiagnostics(bodyText, url)
+        : {};
       emitQualitasProviderEvent(input.options, {
         step: input.step,
         phase: "completed",
@@ -952,6 +1093,7 @@ async function requestWithSession(input: {
         finalSubmission: input.finalSubmission,
         bodyBytes: new TextEncoder().encode(bodyText).byteLength,
         contentType: contentTypeFamily(response.headers.get("content-type")),
+        ...structure,
       });
       return { response, bodyText, finalUrl: url, redirectCount: redirect };
     } catch (error) {
@@ -1001,6 +1143,55 @@ async function requestWithSession(input: {
   }
 
   return { finalUrl: url, redirectCount: MAX_REDIRECTS, redirectedToUnexpectedHost: true };
+}
+
+type QualitasPolicyLookupSession =
+  | { ok: true; cookieJar: Map<string, string>; initial: SessionResponse; policyResponse: SessionResponse }
+  | { ok: false; cookieJar: Map<string, string>; initial: SessionResponse };
+
+async function requestQualitasPolicyLookup(
+  policyNumber: string,
+  options: QualitasRequestOptions,
+): Promise<QualitasPolicyLookupSession> {
+  const cookieJar = new Map<string, string>();
+  const initial = await requestWithSession({
+    url: QUALITAS_PAYMENT_LINK_ENTRYPOINT,
+    init: { method: "GET", headers: { Accept: "text/html" } },
+    cookieJar,
+    options,
+    finalSubmission: false,
+    step: "entrypoint",
+  });
+  if (!initial.bodyText) return { ok: false, cookieJar, initial };
+
+  const lookup = findQualitasPolicyLookupRequest(initial.bodyText, initial.finalUrl);
+  if (!lookup) return { ok: false, cookieJar, initial };
+  const fields = setFormField(lookup.fields, "numPoliza", policyNumber);
+  const headers = new Headers({
+    Accept: lookup.encoding === "MULTIPART" ? "*/*" : "text/html",
+    Origin: new URL(lookup.url).origin,
+    Referer: initial.finalUrl,
+  });
+  let body: URLSearchParams | FormData;
+  if (lookup.encoding === "MULTIPART") {
+    body = new FormData();
+    for (const field of fields) body.append(field.name, field.value);
+    headers.set("X-Pjax", "true");
+    headers.set("X-Requested-With", "XMLHttpRequest");
+  } else {
+    body = new URLSearchParams(fields.map((field): [string, string] => [field.name, field.value]));
+    headers.set("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
+  }
+
+  const policyResponse = await requestWithSession({
+    url: lookup.url,
+    init: { method: "POST", headers, body },
+    cookieJar,
+    options,
+    finalSubmission: false,
+    step: "policy_lookup",
+  });
+  return { ok: true, cookieJar, initial, policyResponse };
 }
 
 function resultForSessionResponse(
@@ -1079,42 +1270,21 @@ export async function prepareQualitasPaymentLink(
 
   const policyNumber = normalizeQualitasPolicyNumber(input.policyNumber);
   if (!policyNumber) return qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
-  const cookieJar = new Map<string, string>();
-  const initial = await requestWithSession({
-    url: QUALITAS_PAYMENT_LINK_ENTRYPOINT,
-    init: { method: "GET", headers: { Accept: "text/html" } },
-    cookieJar,
-    options,
-    finalSubmission: false,
-    step: "entrypoint",
-  });
+  const policyLookup = await requestQualitasPolicyLookup(policyNumber, options);
+  const { cookieJar, initial } = policyLookup;
   if (!initial.bodyText) return resultForSessionResponse(initial, false, options);
-
-  const policyForm = findFormContaining(initial.bodyText, "numPoliza");
-  if (!policyForm || formMethod(policyForm) !== "POST") return qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED");
-  const policyAction = formAction(policyForm, initial.finalUrl);
-  if (!policyAction || !isAllowedQualitasUrl(policyAction)) return qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED");
-  const policyFields = collectFormFields(policyForm);
-  const policyBody = new URLSearchParams(
-    setFormField(policyFields, "numPoliza", policyNumber).map((field): [string, string] => [field.name, field.value]),
-  );
-  const policyResponse = await requestWithSession({
-    url: policyAction,
-    init: {
-      method: "POST",
-      headers: {
-        Accept: "text/html",
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        Origin: new URL(policyAction).origin,
-        Referer: initial.finalUrl,
-      },
-      body: policyBody,
-    },
-    cookieJar,
-    options,
-    finalSubmission: false,
-    step: "policy_lookup",
-  });
+  if (!policyLookup.ok) {
+    emitQualitasProviderEvent(options, {
+      step: "entrypoint",
+      phase: "flow_changed",
+      path: safeQualitasPath(initial.finalUrl),
+      status: initial.response?.status,
+      finalSubmission: false,
+      ...policyFormDiagnostics(initial.bodyText, initial.finalUrl),
+    });
+    return qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED");
+  }
+  const policyResponse = policyLookup.policyResponse;
   if (!policyResponse.bodyText) return resultForSessionResponse(policyResponse, false, options);
 
   const policyHtml = policyResponse.bodyText;
@@ -1213,56 +1383,58 @@ export async function lookupQualitasPendingReceipts(
   policyNumberInput: string,
   options: QualitasRequestOptions = {},
 ): Promise<QualitasReceiptLookupResult> {
+  const finish = (
+    result: QualitasReceiptLookupResult,
+    step: QualitasProviderEvent["step"],
+    details: { status?: number; finalUrl?: string; html?: string } = {},
+  ) => {
+    emitQualitasProviderEvent(options, {
+      step,
+      phase: "classified",
+      path: details.finalUrl ? safeQualitasPath(details.finalUrl) : undefined,
+      status: details.status,
+      finalSubmission: false,
+      ...(details.html ? policyFormDiagnostics(details.html, details.finalUrl ?? QUALITAS_PAYMENT_LINK_ENTRYPOINT) : {}),
+      receiptLookupOutcome: result.outcome,
+      ...(result.outcome === "INCONCLUSIVE" ? { receiptLookupReason: result.reason } : {}),
+    });
+    return result;
+  };
   const policyNumber = normalizeQualitasPolicyNumber(policyNumberInput);
-  if (!policyNumber) return { outcome: "INCONCLUSIVE", reason: "INVALID_INPUT" };
-  const cookieJar = new Map<string, string>();
-  const initial = await requestWithSession({
-    url: QUALITAS_PAYMENT_LINK_ENTRYPOINT,
-    init: { method: "GET", headers: { Accept: "text/html" } },
-    cookieJar,
-    options,
-    finalSubmission: false,
-    step: "entrypoint",
-  });
-  if (initial.bodyText && looksLikeQualitasChallenge(initial.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
-  if (!initial.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
+  if (!policyNumber) return finish({ outcome: "INCONCLUSIVE", reason: "INVALID_INPUT" }, "entrypoint");
+  const policyLookup = await requestQualitasPolicyLookup(policyNumber, options);
+  const { cookieJar, initial } = policyLookup;
+  if (initial.bodyText && looksLikeQualitasChallenge(initial.bodyText)) {
+    return finish({ outcome: "INCONCLUSIVE", reason: "CHALLENGE" }, "entrypoint", { status: initial.response?.status, finalUrl: initial.finalUrl, html: initial.bodyText });
+  }
+  if (!initial.bodyText) {
+    return finish({ outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" }, "entrypoint", { status: initial.response?.status, finalUrl: initial.finalUrl });
+  }
 
-  const policyForm = findFormContaining(initial.bodyText, "numPoliza");
-  if (!policyForm || formMethod(policyForm) !== "POST") return { outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" };
-  const policyAction = formAction(policyForm, initial.finalUrl);
-  if (!policyAction || !isAllowedQualitasUrl(policyAction)) return { outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" };
-  const body = new URLSearchParams(
-    setFormField(collectFormFields(policyForm), "numPoliza", policyNumber).map((field): [string, string] => [field.name, field.value]),
-  );
-  const policyResponse = await requestWithSession({
-    url: policyAction,
-    init: {
-      method: "POST",
-      headers: {
-        Accept: "text/html",
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        Origin: new URL(policyAction).origin,
-        Referer: initial.finalUrl,
-      },
-      body,
-    },
-    cookieJar,
-    options,
-    finalSubmission: false,
-    step: "policy_lookup",
-  });
-  if (policyResponse.bodyText && looksLikeQualitasChallenge(policyResponse.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
-  if (!policyResponse.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
-  if (hasExplicitQualitasPaidMessage(policyResponse.bodyText)) return { outcome: "ALREADY_PAID" };
+  if (!policyLookup.ok) {
+    return finish({ outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" }, "entrypoint", { status: initial.response?.status, finalUrl: initial.finalUrl, html: initial.bodyText });
+  }
+  const policyResponse = policyLookup.policyResponse;
+  if (policyResponse.bodyText && looksLikeQualitasChallenge(policyResponse.bodyText)) {
+    return finish({ outcome: "INCONCLUSIVE", reason: "CHALLENGE" }, "policy_lookup", { status: policyResponse.response?.status, finalUrl: policyResponse.finalUrl, html: policyResponse.bodyText });
+  }
+  if (!policyResponse.bodyText) {
+    return finish({ outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" }, "policy_lookup", { status: policyResponse.response?.status, finalUrl: policyResponse.finalUrl });
+  }
+  if (hasExplicitQualitasPaidMessage(policyResponse.bodyText)) {
+    return finish({ outcome: "ALREADY_PAID" }, "policy_lookup", { status: policyResponse.response?.status, finalUrl: policyResponse.finalUrl, html: policyResponse.bodyText });
+  }
 
   let receiptPage = policyResponse.bodyText;
+  let receiptStatus = policyResponse.response?.status;
+  let receiptFinalUrl = policyResponse.finalUrl;
   let dates = collectQualitasPendingReceiptDates(receiptPage);
   if (dates.length === 0) {
     const navigation = findPagarAhoraRequest(policyResponse.bodyText, policyResponse.finalUrl);
     // Only the observed same-host GET navigation is permitted in this
     // read-only flow. A changed POST form is treated as inconclusive.
     if (!navigation || navigation.method !== "GET" || !isAllowedQualitasUrl(navigation.url)) {
-      return { outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" };
+      return finish({ outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" }, "policy_lookup", { status: policyResponse.response?.status, finalUrl: policyResponse.finalUrl, html: policyResponse.bodyText });
     }
     const paymentPage = await requestWithSession({
       url: navigation.url,
@@ -1272,14 +1444,23 @@ export async function lookupQualitasPendingReceipts(
       finalSubmission: false,
       step: "pagar_ahora",
     });
-    if (paymentPage.bodyText && looksLikeQualitasChallenge(paymentPage.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
-    if (!paymentPage.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
+    if (paymentPage.bodyText && looksLikeQualitasChallenge(paymentPage.bodyText)) {
+      return finish({ outcome: "INCONCLUSIVE", reason: "CHALLENGE" }, "pagar_ahora", { status: paymentPage.response?.status, finalUrl: paymentPage.finalUrl, html: paymentPage.bodyText });
+    }
+    if (!paymentPage.bodyText) {
+      return finish({ outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" }, "pagar_ahora", { status: paymentPage.response?.status, finalUrl: paymentPage.finalUrl });
+    }
     receiptPage = paymentPage.bodyText;
-    if (hasExplicitQualitasPaidMessage(receiptPage)) return { outcome: "ALREADY_PAID" };
+    receiptStatus = paymentPage.response?.status;
+    receiptFinalUrl = paymentPage.finalUrl;
+    if (hasExplicitQualitasPaidMessage(receiptPage)) {
+      return finish({ outcome: "ALREADY_PAID" }, "pagar_ahora", { status: paymentPage.response?.status, finalUrl: paymentPage.finalUrl, html: receiptPage });
+    }
     dates = collectQualitasPendingReceiptDates(receiptPage);
   }
-  if (dates.length === 0) return { outcome: "INCONCLUSIVE", reason: "RECEIPT_DATE_NOT_FOUND" };
-  return { outcome: "OK", nextDueDate: dates[0] };
+  const receiptStep = receiptPage === policyResponse.bodyText ? "policy_lookup" : "pagar_ahora";
+  if (dates.length === 0) return finish({ outcome: "INCONCLUSIVE", reason: "RECEIPT_DATE_NOT_FOUND" }, receiptStep, { status: receiptStatus, finalUrl: receiptFinalUrl, html: receiptPage });
+  return finish({ outcome: "OK", nextDueDate: dates[0] }, receiptStep, { status: receiptStatus, finalUrl: receiptFinalUrl, html: receiptPage });
 }
 
 export async function requestQualitasPaymentLink(
