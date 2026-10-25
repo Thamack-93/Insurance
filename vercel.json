@@ -28,6 +28,10 @@
     {
       "path": "/api/jobs/demo-retention",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/jobs/bonus-run-retention",
+      "schedule": "30 3 * * *"
     }
   ]
 }

@@ -31,6 +31,9 @@ function parseInput(formData: FormData) {
   return { rule, programKey, sellerId, year, periodNumber: rule.period === "QUARTERLY" ? periodNumber : 1, damagePortfolioLossRatio };
 }
 
+// TODO(data-retention): Review the five-day period after the initial testing
+// cycle. Bonus projections and approved bonus runs are all ephemeral snapshots;
+// commission records are financial records and are not part of this purge.
 export async function previewBonus(formData: FormData) {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const input = parseInput(formData);

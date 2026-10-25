@@ -68,7 +68,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
         </div>
       </SectionCard>
 
-      <SectionCard title="Proyecciones y cierres recientes" description="Consulta el estado y el corte de cada cálculo guardado para esta organización.">
+      <SectionCard title="Proyecciones y cierres recientes" description="Todas las corridas, incluidos los cierres aprobados, se eliminan automáticamente cinco días después de su última actualización.">
         {recentRuns.length ? <details className="group" open={Boolean(runId)}>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-b-xl px-4 py-3.5 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
             <span className="min-w-0">
