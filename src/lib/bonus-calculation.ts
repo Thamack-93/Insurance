@@ -139,7 +139,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       expectedTotal: relevantReconciliation.expectedTotal.toFixed(2),
       activeReceiptTotal: relevantReconciliation.receiptTotal.toFixed(2),
       difference: relevantReconciliation.difference.toFixed(2),
-      cancelledReceiptOffset: "cancellationOffset" in relevantReconciliation ? relevantReconciliation.cancellationOffset.toFixed(2) : "0.00",
+      cancelledReceiptOffset: "cancellationOffset" in relevantReconciliation && typeof relevantReconciliation.cancellationOffset === "number" ? relevantReconciliation.cancellationOffset.toFixed(2) : "0.00",
       cancelledReceiptIds: "cancelledReceiptIds" in relevantReconciliation ? relevantReconciliation.cancelledReceiptIds : [],
     } : null;
     const overpaid = totalPosted > n(receipt.amount) + 0.01;
