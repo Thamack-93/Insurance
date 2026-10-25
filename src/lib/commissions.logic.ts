@@ -88,7 +88,9 @@ export function calculateCommissionEstimate(
   asOf: Date,
   policyRateOverride?: number | null,
 ): CommissionEstimate {
-  if (!components || Object.values(components).some((amount) => !Number.isFinite(amount) || amount < 0)) {
+  if (!components || [components.totalPremium, components.iva, components.issuanceExpense, components.visibleDiscounts]
+    .some((amount) => !Number.isFinite(amount) || amount < 0)
+    || !Number.isFinite(components.installmentSurcharge)) {
     return { status: "REVIEW", reason: "Completa prima total, IVA, gastos de expedición, recargo fraccionado y descuentos visibles." };
   }
   const overrideRule: CommissionRule | null = policyRateOverride === null || policyRateOverride === undefined ? null : {
