@@ -6,6 +6,7 @@ import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDate } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
 import { getPolicyOptionLabel } from "@/lib/policy-identity";
+import type { SelectOption } from "@/lib/domain-options";
 import {
   endorsementOperationalWhere,
   policyOperationalWhere,
@@ -67,15 +68,24 @@ export default async function NewReceiptPage({
         value: policy.id,
         label: getPolicyOptionLabel(policy, [policy.client.fullName]),
       }));
-  const endorsementOptions =
-    selectedEndorsement && selectedEndorsement.policyId === contextPolicy?.id
-      ? [
-          {
-            value: selectedEndorsement.id,
-            label: `${selectedEndorsement.endorsementNumber} · ${selectedEndorsement.reference ?? "Sin referencia"}`,
-          },
-        ]
-      : undefined;
+  const endorsementPolicyIds = Array.from(new Set(policyOptions.map((option) => option.value)));
+  const endorsements = await withTenantTransaction(scope.context, (db) => db.policyEndorsement.findMany({
+    where: {
+      policyId: { in: endorsementPolicyIds },
+      ...endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
+    },
+    select: { id: true, policyId: true, endorsementNumber: true, reference: true },
+    orderBy: { endorsementNumber: "asc" },
+  }));
+  const endorsementOptionsByPolicy = endorsements.reduce<Record<string, SelectOption[]>>((optionsByPolicy, endorsement) => {
+    const options = optionsByPolicy[endorsement.policyId] ?? [];
+    options.push({
+      value: endorsement.id,
+      label: `${endorsement.endorsementNumber} · ${endorsement.reference ?? "Sin referencia"}`,
+    });
+    optionsByPolicy[endorsement.policyId] = options;
+    return optionsByPolicy;
+  }, {});
 
   return (
     <div className="flex flex-col gap-6">
@@ -100,7 +110,7 @@ export default async function NewReceiptPage({
           })}
           policyOptions={policyOptions}
           policyAssets={Object.fromEntries(policies.map((policy) => [policy.id, policy.insuredAssets]))}
-          endorsementOptions={endorsementOptions}
+          endorsementOptionsByPolicy={endorsementOptionsByPolicy}
           submitAction={createReceipt}
           footerActions={
             selectedEndorsement && selectedEndorsement.policy ? (
