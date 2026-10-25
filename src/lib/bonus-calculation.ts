@@ -77,8 +77,11 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
   });
   const policyIds = [...new Set(candidates.map((payment) => payment.policyId))];
   const receiptRows = policyIds.length ? await db.receipt.findMany({
-    where: { organizationId, policyId: { in: policyIds }, status: { not: "CANCELLED" } },
-    select: { policyId: true, endorsementId: true, amount: true, status: true },
+    where: { organizationId, policyId: { in: policyIds } },
+    select: {
+      id: true, policyId: true, receiptSequence: true, endorsementId: true, amount: true, status: true, cancelledAt: true, cancellationReason: true,
+      payments: { where: { organizationId, status: "POSTED" }, select: { id: true } },
+    },
   }) : [];
   const endorsementIds = [...new Set(candidates.map((payment) => payment.receipt.endorsementId).filter((id): id is string => Boolean(id)))];
   const endorsementRows = endorsementIds.length ? await db.policyEndorsement.findMany({
@@ -92,7 +95,19 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
     else baseReceiptsByPolicy.set(row.policyId, [...(baseReceiptsByPolicy.get(row.policyId) ?? []), row]);
   }
   const policyPremiumById = new Map(candidates.map((payment) => [payment.policyId, n(payment.policy.premiumAmount)]));
-  const policyReconciliation = new Map(policyIds.map((policyId) => [policyId, reconcilePolicyReceiptPremium(policyPremiumById.get(policyId) ?? 0, (baseReceiptsByPolicy.get(policyId) ?? []).map((row) => ({ amount: n(row.amount), status: row.status })))]));
+  const policyReconciliation = new Map(policyIds.map((policyId) => {
+    const rows = (baseReceiptsByPolicy.get(policyId) ?? []).map((row) => ({
+      id: row.id,
+      amount: n(row.amount),
+      status: row.status,
+      receiptSequence: row.receiptSequence,
+      endorsementId: row.endorsementId,
+      cancelledAt: row.cancelledAt,
+      cancellationReason: row.cancellationReason,
+      postedPaymentCount: row.payments.length,
+    }));
+    return [policyId, reconcilePolicyReceiptPremium(policyPremiumById.get(policyId) ?? 0, rows)] as const;
+  }));
   const endorsementReconciliation = new Map(endorsementRows.map((endorsement) => [endorsement.id, reconcileEndorsementReceiptPremium(n(endorsement.amount), (endorsementReceipts.get(endorsement.id) ?? []).map((row) => ({ amount: n(row.amount), status: row.status })))]));
   const byReceipt = new Map<string, typeof candidates>();
   for (const payment of candidates) byReceipt.set(payment.receiptId, [...(byReceipt.get(payment.receiptId) ?? []), payment]);
@@ -120,6 +135,13 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
     const relevantReconciliation = receipt.endorsementId
       ? endorsementReconciliation.get(receipt.endorsementId)
       : policyReconciliation.get(receiptPayments[0].policyId);
+    const reconciliationEvidence = relevantReconciliation ? {
+      expectedTotal: relevantReconciliation.expectedTotal.toFixed(2),
+      activeReceiptTotal: relevantReconciliation.receiptTotal.toFixed(2),
+      difference: relevantReconciliation.difference.toFixed(2),
+      cancelledReceiptOffset: "cancellationOffset" in relevantReconciliation && typeof relevantReconciliation.cancellationOffset === "number" ? relevantReconciliation.cancellationOffset.toFixed(2) : "0.00",
+      cancelledReceiptIds: "cancelledReceiptIds" in relevantReconciliation ? relevantReconciliation.cancelledReceiptIds : [],
+    } : null;
     const overpaid = totalPosted > n(receipt.amount) + 0.01;
     const totalNetPaid = calculatedNet === null || currencyMismatch || overpaid ? null : allocatePaidNetPremium(calculatedNet, n(receipt.amount), totalPosted);
     const scale = totalPosted > 0 && totalNetPaid !== null ? totalNetPaid / totalPosted : 0;
@@ -178,7 +200,16 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
         netPremiumPaid: netPaid?.toFixed(2) ?? null, eligibleAmount: amount?.toFixed(2) ?? null,
         conversionRate: conversion?.conversionRate ?? null, conversionDate: conversion?.conversionDate ?? null,
         reason: reasons.join(" ") || null,
-        evidence: { paidDate: payment.paidDate.toISOString(), insurer: policy.insurer.name, policyType: policy.policyType, sellerId: policy.bonusSellerId ?? policy.client.portfolioOwnerId, netPremiumSource: netPremiumFromUnitBreakdown ? "UNIT_BREAKDOWN_REVIEW" : calculatedNet === null ? null : "RECEIPT_COMPONENTS", ruleEvidence: evidenceCheck.data },
+        evidence: {
+          paidDate: payment.paidDate.toISOString(),
+          insurer: policy.insurer.name,
+          policyType: policy.policyType,
+          sellerId: policy.bonusSellerId ?? policy.client.portfolioOwnerId,
+          netPremiumSource: netPremiumFromUnitBreakdown ? "UNIT_BREAKDOWN_REVIEW" : calculatedNet === null ? null : "RECEIPT_COMPONENTS",
+          policyStatus: policy.status,
+          premiumReconciliation: reconciliationEvidence,
+          ruleEvidence: evidenceCheck.data,
+        },
       });
     }
   }

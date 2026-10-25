@@ -61,10 +61,48 @@ export function allocatePaidNetPremium(netPremium: number, receiptAmount: number
   return roundPremiumMoney(netPremium * Math.min(postedPaymentAmount, receiptAmount) / receiptAmount);
 }
 
-export function reconcilePolicyReceiptPremium(policyPremium: number, receiptAmounts: Array<{ amount: number; status: string; endorsementId?: string | null }>) {
-  const baseReceipts = receiptAmounts.filter((receipt) => receipt.status !== "CANCELLED" && !receipt.endorsementId);
-  const receiptTotal = roundPremiumMoney(baseReceipts.reduce((sum, receipt) => sum + receipt.amount, 0));
-  const expectedTotal = roundPremiumMoney(policyPremium);
+export type PolicyReceiptReconciliationRow = {
+  id?: string;
+  amount: number;
+  status: string;
+  receiptSequence?: number | null;
+  endorsementId?: string | null;
+  cancelledAt?: Date | null;
+  cancellationReason?: string | null;
+  postedPaymentCount?: number;
+};
+
+/**
+ * A cancelled, unpaid final installment for non-payment offsets original policy
+ * premium. Earlier paid installments remain part of the active receipt total.
+ * Legacy receipts without a stable sequence or cancellation evidence fail closed.
+ */
+export function reconcilePolicyReceiptPremium(
+  policyPremium: number,
+  receiptAmounts: PolicyReceiptReconciliationRow[],
+) {
+  const baseReceipts = receiptAmounts.filter((receipt) => !receipt.endorsementId);
+  const activeBaseReceipts = baseReceipts.filter((receipt) => receipt.status !== "CANCELLED");
+  const receiptTotal = roundPremiumMoney(activeBaseReceipts.reduce((sum, receipt) => sum + receipt.amount, 0));
+  const sequences = baseReceipts.flatMap((receipt) => receipt.receiptSequence == null ? [] : [receipt.receiptSequence]);
+  const latestReceiptSequence = sequences.length ? Math.max(...sequences) : null;
+  const latestSequenceRows = latestReceiptSequence === null ? [] : baseReceipts.filter((receipt) => receipt.receiptSequence === latestReceiptSequence);
+  const cancellationOffsets = latestSequenceRows.length === 1 && latestSequenceRows[0].status === "CANCELLED"
+    && latestSequenceRows[0].cancellationReason === "NON_PAYMENT"
+    && latestSequenceRows[0].cancelledAt != null
+    && (latestSequenceRows[0].postedPaymentCount ?? 0) === 0
+    ? latestSequenceRows
+    : [];
+  const cancellationOffset = roundPremiumMoney(cancellationOffsets.reduce((sum, receipt) => sum + receipt.amount, 0));
+  const expectedTotal = roundPremiumMoney(policyPremium - cancellationOffset);
   const difference = roundPremiumMoney(expectedTotal - receiptTotal);
-  return { expectedTotal, receiptTotal, difference, status: Math.abs(difference) <= PREMIUM_RECONCILIATION_TOLERANCE ? "RECONCILED" as const : "REVIEW" as const };
+  const status = expectedTotal >= 0 && Math.abs(difference) <= PREMIUM_RECONCILIATION_TOLERANCE ? "RECONCILED" as const : "REVIEW" as const;
+  return {
+    expectedTotal,
+    receiptTotal,
+    difference,
+    cancellationOffset,
+    cancelledReceiptIds: cancellationOffsets.flatMap((receipt) => receipt.id ? [receipt.id] : []),
+    status,
+  };
 }

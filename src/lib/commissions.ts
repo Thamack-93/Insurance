@@ -92,8 +92,27 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
           ? reconcileEndorsementReceiptPremium(Number(endorsement.amount), endorsementReceipts.map((row) => ({ amount: Number(row.amount), status: row.status })))
           : { difference: Number(receipt.amount), status: "REVIEW" };
       } else {
-        const baseReceipts = await tx.receipt.findMany({ where: { policyId: receipt.policyId, organizationId: context.organizationId, endorsementId: null }, select: { amount: true, status: true } });
-        reconciliation = reconcilePolicyReceiptPremium(Number(receipt.policy.premiumAmount), baseReceipts.map((row) => ({ amount: Number(row.amount), status: row.status })));
+        const baseReceipts = await tx.receipt.findMany({
+          where: { policyId: receipt.policyId, organizationId: context.organizationId, endorsementId: null },
+          select: {
+            id: true,
+            amount: true,
+            status: true,
+            receiptSequence: true,
+            cancelledAt: true,
+            cancellationReason: true,
+            payments: { where: { organizationId: context.organizationId, status: "POSTED" }, select: { id: true } },
+          },
+        });
+        reconciliation = reconcilePolicyReceiptPremium(Number(receipt.policy.premiumAmount), baseReceipts.map((row) => ({
+          id: row.id,
+          amount: Number(row.amount),
+          status: row.status,
+          receiptSequence: row.receiptSequence,
+          cancelledAt: row.cancelledAt,
+          cancellationReason: row.cancellationReason,
+          postedPaymentCount: row.payments.length,
+        })));
       }
       if (reconciliation.status !== "RECONCILED") {
         const reason = `La prima no concilia con los recibos vigentes (diferencia ${reconciliation.difference.toFixed(2)} ${receipt.currency}); revisa recibos antes de calcular.`;
