@@ -8,12 +8,12 @@ import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ReceiptFormValues } from "@/lib/validations";
 import { getPolicyOptionLabel } from "@/lib/policy-identity";
-import { policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { endorsementOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const { receipt, policies } = await withTenantTransaction(scope.context, async (db) => {
+  const { receipt, policies, endorsements } = await withTenantTransaction(scope.context, async (db) => {
     const receipt = await db.receipt.findFirst({
       where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: {
@@ -32,7 +32,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
         },
       },
     });
-    if (!receipt) return { receipt: null, policies: [] };
+    if (!receipt) return { receipt: null, policies: [], endorsements: [] };
     const policies = receipt.endorsement
       ? [{
           id: receipt.policyId,
@@ -47,21 +47,25 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
           include: { client: true, insuredAssets: { select: { id: true, description: true, unitClass: true, isPrimary: true } } },
           orderBy: { policyNumber: "asc" },
         });
-    return { receipt, policies };
+    const endorsements = await db.policyEndorsement.findMany({
+      where: {
+        policyId: receipt.policyId,
+        ...endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
+      },
+      select: { id: true, endorsementNumber: true, reference: true },
+      orderBy: { endorsementNumber: "asc" },
+    });
+    return { receipt, policies, endorsements };
   });
 
   if (!receipt) {
     notFound();
   }
 
-  const endorsementOptions = receipt.endorsement
-    ? [
-        {
-          value: receipt.endorsement.id,
-          label: `${receipt.endorsement.endorsementNumber} · ${receipt.endorsement.reference ?? "Sin referencia"}`,
-        },
-      ]
-    : undefined;
+  const endorsementOptions = endorsements.map((endorsement) => ({
+    value: endorsement.id,
+    label: `${endorsement.endorsementNumber} · ${endorsement.reference ?? "Sin referencia"}`,
+  }));
 
   return (
     <div className="flex flex-col gap-6">
