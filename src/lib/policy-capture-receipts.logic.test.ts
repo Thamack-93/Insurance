@@ -52,6 +52,95 @@ describe("policy-capture-receipts", () => {
     expect(payloads.reduce((sum, payload) => sum + payload.amount, 0)).toBe(1200);
   });
 
+  it("calculates 16% IVA on the pre-tax base and reconciles the known receipt", () => {
+    const payload = buildAutoCaptureReceiptPayload({
+      organizationId: "org-test",
+      policyId: "policy-iva",
+      clientId: "client-1",
+      insurerId: "insurer-1",
+      userId: "user-1",
+      premiumBreakdown: { issuanceExpenseAmount: 0, surchargeAmount: 121.5, discountAmount: 0 },
+      draft: {
+        policyNumber: "P-IVA",
+        clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        insurerName: "Aseguradora Demo",
+        policyType: "AUTO",
+        serialNumber: null,
+        startDate: "2026-01-01",
+        endDate: "2027-01-01",
+        issueDate: null,
+        paymentFrequency: "SINGLE",
+        paymentPlan: null,
+        premiumAmount: 1707.18,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: null,
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      },
+    });
+
+    expect(payload.vatAmount).toBe(235.47);
+    expect(payload.issuanceExpenseAmount).toBe(0);
+    expect(payload.surchargeAmount).toBe(121.5);
+    expect(payload.discountAmount).toBe(0);
+    expect(payload.commissionCalculationStatus).toBe("NOT_CALCULATED");
+    expect(payload.commissionReviewReason).toBeNull();
+    expect((payload.amount - payload.vatAmount! - payload.issuanceExpenseAmount! - payload.surchargeAmount! + payload.discountAmount!)).toBeCloseTo(1350.21, 2);
+    expect((1350.21 + 121.5) * 0.16).toBeCloseTo(payload.vatAmount!, 2);
+  });
+
+  it("puts issuance on the first receipt and allocates surcharge and discounts by net premium", () => {
+    const payloads = buildAutoCaptureReceiptPayloads({
+      organizationId: "org-test",
+      policyId: "policy-monthly-breakdown",
+      clientId: "client-1",
+      insurerId: "insurer-1",
+      userId: "user-1",
+      premiumBreakdown: { issuanceExpenseAmount: 12, surchargeAmount: 24, discountAmount: 12 },
+      draft: {
+        policyNumber: "P-MONTHLY",
+        clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        insurerName: "Aseguradora Demo",
+        policyType: "AUTO",
+        serialNumber: null,
+        startDate: "2026-01-01",
+        endDate: "2027-01-01",
+        issueDate: null,
+        paymentFrequency: "MONTHLY",
+        paymentPlan: null,
+        premiumAmount: 1200,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: null,
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      },
+    });
+
+    expect(payloads).toHaveLength(12);
+    expect(payloads[0]?.issuanceExpenseAmount).toBe(12);
+    expect(payloads.slice(1).every((item) => item.issuanceExpenseAmount === 0)).toBe(true);
+    expect(payloads.reduce((sum, item) => sum + item.vatAmount!, 0)).toBeCloseTo(165.52, 2);
+    expect(payloads.reduce((sum, item) => sum + item.surchargeAmount!, 0)).toBeCloseTo(24, 2);
+    expect(payloads.reduce((sum, item) => sum + item.discountAmount!, 0)).toBeCloseTo(12, 2);
+    const net = (item: typeof payloads[number]) => item.amount - item.vatAmount! - item.issuanceExpenseAmount! - item.surchargeAmount! + item.discountAmount!;
+    expect(payloads[0]!.surchargeAmount! / net(payloads[0]!)).toBeCloseTo(payloads[1]!.surchargeAmount! / net(payloads[1]!), 4);
+    expect(payloads[0]!.discountAmount! / net(payloads[0]!)).toBeCloseTo(payloads[1]!.discountAmount! / net(payloads[1]!), 4);
+  });
+
   it("uses matching notice vencimiento and control number for a single receipt", () => {
     const payload = buildAutoCaptureReceiptPayload({
       organizationId: "org-test",

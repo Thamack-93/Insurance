@@ -10,7 +10,8 @@ import { businessToday } from "@/lib/business-dates";
 import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
-import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
+import { syncAutoCaptureReceipts, syncPolicyPremiumBreakdownToReceipts } from "@/lib/policy-capture-receipts";
+import { calculateVatFromGross } from "@/lib/premium-breakdown";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { Prisma } from "@/generated/prisma/client";
 import { convertLegacyPolicyDescription, hasPolicyRiskData, policyRiskDetailsSchema, projectPolicyRiskRelations, riskDetailsFromExisting, summarizePolicyRiskDetails } from "@/lib/policy-risk-details";
@@ -42,6 +43,9 @@ const confirmSchema = z.object({
     paymentFrequency: z.string().min(1),
     paymentPlan: z.string().nullable().optional(),
     premiumAmount: z.number(),
+    premiumIssuanceExpenseAmount: z.number().nonnegative().nullable().optional(),
+    premiumSurchargeAmount: z.number().nonnegative().nullable().optional(),
+    premiumDiscountAmount: z.number().nonnegative().nullable().optional(),
     commissionRateOverride: z.number().min(0).max(100).refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-7).nullable().optional(),
     currency: z.string().min(1),
     requestNumber: z.string().nullable().optional(),
@@ -96,6 +100,9 @@ function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPd
     paymentFrequency: draft.paymentFrequency.trim().toUpperCase(),
     paymentPlan: draft.paymentPlan?.trim() || null,
     premiumAmount: draft.premiumAmount,
+    premiumIssuanceExpenseAmount: draft.premiumIssuanceExpenseAmount ?? null,
+    premiumSurchargeAmount: draft.premiumSurchargeAmount ?? null,
+    premiumDiscountAmount: draft.premiumDiscountAmount ?? null,
     commissionRateOverride: draft.commissionRateOverride ?? null,
     currency: draft.currency.trim().toUpperCase(),
     requestNumber: draft.requestNumber?.trim() || null,
@@ -360,6 +367,10 @@ export async function POST(request: NextRequest) {
         startDate: targetStartDate,
         endDate: targetEndDate,
         premiumAmount: captureDraft.premiumAmount,
+        premiumVatAmount: calculateVatFromGross(captureDraft.premiumAmount),
+        premiumIssuanceExpenseAmount: captureDraft.premiumIssuanceExpenseAmount ?? null,
+        premiumSurchargeAmount: captureDraft.premiumSurchargeAmount ?? null,
+        premiumDiscountAmount: captureDraft.premiumDiscountAmount ?? null,
         ...(!existingTarget || captureDraft.commissionRateOverride !== null
           ? { commissionRateOverride: context.membershipRole === "AGENT" ? existingTarget?.commissionRateOverride ?? null : captureDraft.commissionRateOverride }
           : {}),
@@ -416,6 +427,19 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      if (existingTarget) {
+        await syncPolicyPremiumBreakdownToReceipts(tx, {
+          organizationId: context.organizationId,
+          policyId: targetPolicy.id,
+          userId: context.userId,
+          breakdown: {
+            issuanceExpenseAmount: captureDraft.premiumIssuanceExpenseAmount ?? null,
+            surchargeAmount: captureDraft.premiumSurchargeAmount ?? null,
+            discountAmount: captureDraft.premiumDiscountAmount ?? null,
+          },
+        });
+      }
+
       const autoReceiptResults = await syncAutoCaptureReceipts(tx, {
         organizationId: context.organizationId,
         policyId: targetPolicy.id,
@@ -425,6 +449,11 @@ export async function POST(request: NextRequest) {
         userId: context.userId,
         receiptPlan: payload.receiptPlan,
         receiptEvidence: payload.receiptEvidence ?? null,
+        premiumBreakdown: {
+          issuanceExpenseAmount: captureDraft.premiumIssuanceExpenseAmount ?? null,
+          surchargeAmount: captureDraft.premiumSurchargeAmount ?? null,
+          discountAmount: captureDraft.premiumDiscountAmount ?? null,
+        },
       });
 
       for (const autoReceiptResult of autoReceiptResults) {

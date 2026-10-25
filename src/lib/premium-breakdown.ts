@@ -14,6 +14,12 @@ export function roundPremiumMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+/** IVA at 16% of the pre-tax total, expressed from a tax-inclusive amount. */
+export function calculateVatFromGross(amountIncludingVat: number) {
+  if (!Number.isFinite(amountIncludingVat) || amountIncludingVat < 0) return null;
+  return roundPremiumMoney(amountIncludingVat * 16 / 116);
+}
+
 const PREMIUM_RECONCILIATION_TOLERANCE = 1;
 
 /** Returns null until every component is explicitly captured. */
