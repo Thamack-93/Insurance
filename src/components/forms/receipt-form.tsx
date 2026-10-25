@@ -228,10 +228,10 @@ export function ReceiptForm({
             </FormGrid>
           </FormSection>
 
-          <FormSection title="Datos para calcular la prima neta" description="Captura los importes que aparecen en el recibo: prima total − IVA − gastos de expedición − recargo fraccionado + descuentos visibles = prima neta.">
+          <FormSection title="Ajuste excepcional del recibo" description="El desglose normal se captura una sola vez en la póliza y se distribuye automáticamente. Usa estos campos solo si el documento de este recibo muestra importes distintos al reparto generado; prima total − IVA − expedición − recargo + descuentos = prima neta.">
             {selectedAssets.length > 1 ? (
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">Captura cada concepto por bien o persona asegurada; la tasa puede cambiar según su clasificación.</p>
+                <p className="text-sm text-muted-foreground">Solo hace falta separar por bien o persona cuando el documento lo respalda y las reglas de comisión cambian según su clasificación.</p>
                 {selectedAssets.map((asset, index) => (
                   <div key={asset.id} className="rounded-lg border p-4">
                     <p className="mb-3 text-sm font-medium">{asset.description || `Riesgo ${index + 1}`} · {asset.unitClass || "Clase asegurable pendiente"}</p>
@@ -248,7 +248,7 @@ export function ReceiptForm({
               </div>
             ) : (
               <FormGrid>
-                <p className="text-sm text-muted-foreground">El importe del recibo es la prima total; captura solo los componentes que aparecen desglosados.</p>
+                <p className="text-sm text-muted-foreground">El importe del recibo es la prima total; captura solo conceptos que difieran del reparto de la póliza y estén visibles en este recibo.</p>
                 <FormField label="IVA" htmlFor="vatAmount"><Input id="vatAmount" type="number" min="0" step="0.01" {...register("vatAmount")} /></FormField>
                 <FormField label="Gastos de expedición" htmlFor="issuanceExpenseAmount"><Input id="issuanceExpenseAmount" type="number" min="0" step="0.01" {...register("issuanceExpenseAmount")} /></FormField>
                 <FormField label="Recargo fraccionado" htmlFor="surchargeAmount"><Input id="surchargeAmount" type="number" min="0" step="0.01" {...register("surchargeAmount")} /></FormField>

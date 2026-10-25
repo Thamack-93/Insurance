@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { CommandPalette, type CommandPaletteGroup } from "@/components/command/command-palette";
 import { clientTypeOptions, currencyOptions, paymentFrequencyOptions, policyTypeOptions } from "@/lib/domain-options";
 import { formatCurrency } from "@/lib/money";
+import { calculateVatFromGross } from "@/lib/premium-breakdown";
 import { formatDate } from "@/lib/dates";
 import { statusLabel } from "@/lib/status";
 import {
@@ -101,6 +102,9 @@ function createEmptyDraft(): PolicyPdfCaptureDraft {
     paymentFrequency: "ANNUAL",
     paymentPlan: null,
     premiumAmount: 0,
+    premiumIssuanceExpenseAmount: null,
+    premiumSurchargeAmount: null,
+    premiumDiscountAmount: null,
     commissionRateOverride: null,
     currency: "MXN",
     requestNumber: null,
@@ -1277,6 +1281,28 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                         markFieldConfidence("premiumAmount");
                       }}
                     />
+                  </Field>
+                  <Field label="Desglose total de prima" confidence="medium">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {([
+                        ["premiumIssuanceExpenseAmount", "Gastos de expedición totales"],
+                        ["premiumSurchargeAmount", "Recargo fraccionado total"],
+                        ["premiumDiscountAmount", "Descuentos totales"],
+                      ] as const).map(([key, label]) => (
+                        <label key={key} className="space-y-1 text-xs text-muted-foreground">
+                          <span>{label}</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Pendiente"
+                            value={draft[key] ?? ""}
+                            onChange={(event) => updateDraft({ [key]: event.target.value === "" ? null : Number(event.target.value) } as Partial<PolicyPdfCaptureDraft>)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Se captura una vez por póliza. El sistema calcula el IVA al 16% de la base antes de IVA, reparte recargo y descuentos proporcionalmente a la prima neta de cada recibo y asigna toda la expedición al primero. Usa 0 cuando confirmes que un concepto no aplica. IVA calculado: {formatCurrency(calculateVatFromGross(draft.premiumAmount) ?? 0, draft.currency)}.</p>
                   </Field>
                   <Field label="Comisión específica de póliza (%)" confidence="medium">
                     <div className="space-y-1.5">

@@ -20,6 +20,7 @@ const optionalEmail = z.string().email("Email invalido.").optional().or(z.litera
 const requiredDate = z.string().min(1, "Selecciona una fecha.");
 const optionalDate = z.string().optional().or(z.literal(""));
 const commissionMoney = z.union([z.literal(""), z.coerce.number().nonnegative("El importe no puede ser negativo.")]).optional();
+const optionalPolicyMoney = commissionMoney;
 const receiptCommissionUnitSchema = z.object({
   insuredAssetId: z.string().min(1),
   totalPremium: commissionMoney,
@@ -88,6 +89,9 @@ const policyBaseSchema = z
     startDate: requiredDate,
     endDate: requiredDate,
     premiumAmount: z.coerce.number().positive("La prima debe ser mayor a cero."),
+    premiumIssuanceExpenseAmount: optionalPolicyMoney,
+    premiumSurchargeAmount: optionalPolicyMoney,
+    premiumDiscountAmount: optionalPolicyMoney,
     commissionRateOverride: z.union([
       z.literal(""),
       z.coerce.number().min(0, "La tasa no puede ser negativa.").max(100, "La tasa no puede superar 100%.").refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-7, "Usa máximo dos decimales para la tasa.")

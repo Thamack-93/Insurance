@@ -189,10 +189,37 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
         unitBreakdownCount: storedRows.length,
       });
 
+      // Policy-level totals are sufficient for a multi-person/unit policy when
+      // every insured risk resolves to the same commission rule and rate. This
+      // calculates the aggregate once instead of inventing an allocation per unit.
+      const aggregateAssetEstimates = !receipt.endorsementId && assets.length && aggregateComponents && aggregateNetPremium !== null
+        && (policyRateOverride !== null || Boolean(policyUnitClass) || assets.every((asset) => Boolean(asset.unitClass?.trim())))
+        ? assets.map((asset) => {
+            const unitClass = asset.unitClass?.trim().toUpperCase() || policyUnitClass || "POLICY_OVERRIDE";
+            const estimate = calculateCommissionEstimate(aggregateComponents, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass, paymentFrequency: receipt.policy.paymentFrequency }, ruleDate, policyRateOverride);
+            return { asset, unitClass, estimate };
+          })
+        : [];
+      const aggregateRuleKeys = aggregateAssetEstimates.map(({ estimate }) => `${estimate.rule?.id ?? (policyRateOverride === null ? "NO_RULE" : "POLICY_OVERRIDE")}:${estimate.rate ?? "REVIEW"}`);
+      const canCalculateAggregateAssets = aggregateAssetEstimates.length === assets.length
+        && aggregateAssetEstimates.length > 0
+        && aggregateAssetEstimates.every(({ estimate }) => estimate.status === "CALCULATED" && estimate.amount !== undefined)
+        && new Set(aggregateRuleKeys).size === 1;
+      if (canCalculateAggregateAssets && aggregateComponents) {
+        const first = aggregateAssetEstimates[0]!;
+        calculations.push({
+          assetId: null,
+          description: `Póliza (${assets.length} riesgos asegurados; desglose capturado a nivel póliza)`,
+          unitClass: "POLICY_AGGREGATE",
+          components: aggregateComponents,
+          estimate: first.estimate as typeof calculations[number]["estimate"],
+        });
+      }
+
       // An empty modality can still resolve to a rule configured with policyMode="*".
       // If the insurer differentiates rates by modality, only a matching specific rule
       // can calculate; otherwise calculateCommissionEstimate leaves the receipt in REVIEW.
-      if (assets.length) {
+      if (assets.length && !canCalculateAggregateAssets) {
         const byAsset = new Map(calculationRows.map((row) => [row.insuredAssetId, row]));
         const endorsementPartyIds = receipt.endorsementId
           ? new Set(assets.filter((asset) => {
@@ -222,7 +249,7 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
         } else if (receipt.endorsementId && (!endorsementPartyIds?.size || positiveEndorsementRows.length !== calculationAssets.length)) {
           reviewReason = "El endoso no identifica con claridad a las personas o unidades cuyo importe se desglosa.";
         } else if (!calculationAssets.length || byAsset.size !== calculationAssets.length || calculationAssets.some((asset) => !byAsset.has(asset.id)) || rows.some((row) => !assets.some((asset) => asset.id === row.insuredAssetId))) {
-          reviewReason = "Completa el desglose de prima por cada unidad asegurada antes de calcular.";
+          reviewReason = "Completa el desglose por riesgo solo cuando las reglas de comisión difieran entre las unidades aseguradas.";
         } else {
           for (const asset of calculationAssets) {
             const row = byAsset.get(asset.id)!;
@@ -235,7 +262,7 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
             calculations.push({ assetId: asset.id, description: asset.description, unitClass, components: components!, estimate: estimate as typeof calculations[number]["estimate"] });
           }
         }
-      } else {
+      } else if (!assets.length) {
         const components = premiumComponents(receipt);
         if (policyRateOverride === null && !policyUnitClass) reviewReason = "Indica la clase de riesgo asegurada para aplicar una regla de comisión.";
         else if (components && components.totalPremium <= 0) reviewReason = "Captura la prima total antes de calcular.";

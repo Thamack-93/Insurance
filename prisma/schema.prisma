@@ -469,6 +469,11 @@ model Policy {
   startDate                 DateTime
   endDate                   DateTime
   premiumAmount             Decimal
+  /// Policy-term totals; base receipts inherit proportional allocations.
+  premiumVatAmount          Decimal?
+  premiumIssuanceExpenseAmount Decimal?
+  premiumSurchargeAmount    Decimal?
+  premiumDiscountAmount     Decimal?
   commissionRateOverride    Decimal?     @db.Decimal(5, 2)
   currency                  String       @default("MXN")
   paymentFrequency          String
