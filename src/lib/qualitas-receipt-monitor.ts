@@ -5,13 +5,35 @@ import { createNotification } from "@/lib/notifications";
 import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { assertOrganizationContextInTransaction, withSystemOrganizationTransaction, withTenantTransaction, type OrganizationContext } from "@/lib/organization-context";
 import { writeActivityLog } from "@/lib/activity-log";
-import { isQualitasInsurerName, lookupQualitasPendingReceipts } from "@/lib/qualitas-payment-link";
+import { isQualitasInsurerName, lookupQualitasPendingReceipts, type QualitasProviderEvent } from "@/lib/qualitas-payment-link";
 import { compareQualitasNextReceipt, type QualitasMonitorComparison, type QualitasMonitorReceipt } from "@/lib/qualitas-receipt-monitor-logic";
 import { supportsDomiciliatedPaymentMethod } from "@/lib/payment-frequency";
 import { recordPayment } from "@/lib/payment-service";
 
 export function isQualitasReceiptMonitorEnabled() {
   return process.env.QUALITAS_RECEIPT_MONITOR_ENABLED?.trim() === "1";
+}
+
+function logQualitasReceiptProviderEvent(event: QualitasProviderEvent) {
+  try {
+    console.info("[qualitas.receipt_check.provider]", JSON.stringify({
+      step: event.step,
+      phase: event.phase,
+      status: event.status,
+      durationMs: event.durationMs,
+      contentType: event.contentType,
+      formCount: event.formCount,
+      hasPolicyForm: event.hasPolicyForm,
+      policyFormMethod: event.policyFormMethod,
+      policyActionAllowed: event.policyActionAllowed,
+      receiptLookupOutcome: event.receiptLookupOutcome,
+      receiptLookupReason: event.receiptLookupReason,
+      outcome: event.outcome,
+      reason: event.reason,
+    }));
+  } catch {
+    // Provider diagnostics must never change the result of a read-only lookup.
+  }
 }
 
 function dateKey(value: Date | string) {
@@ -77,7 +99,10 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
 
   // A portal response is checked outside a database transaction. The only
   // writes below are the sanitized audit observation; receipt state is untouched.
-  const lookup = await lookupQualitasPendingReceipts(initial.policyNumber, { traceId: "qualitas-receipt-monitor" });
+  const lookup = await lookupQualitasPendingReceipts(initial.policyNumber, {
+    traceId: "qualitas-receipt-monitor",
+    onEvent: logQualitasReceiptProviderEvent,
+  });
   const portalDueDate = lookup.outcome === "OK" ? lookup.nextDueDate : null;
   const checkedAt = new Date();
   return withTenantTransaction(context, async (tx) => {
@@ -238,7 +263,10 @@ export async function runQualitasReceiptMonitorScan(organizationId: string): Pro
     summary.scanned += 1;
     let lookup: Awaited<ReturnType<typeof lookupQualitasPendingReceipts>>;
     try {
-      lookup = await lookupQualitasPendingReceipts(policy.policyNumber, { traceId: "qualitas-receipt-monitor-job" });
+      lookup = await lookupQualitasPendingReceipts(policy.policyNumber, {
+        traceId: "qualitas-receipt-monitor-job",
+        onEvent: logQualitasReceiptProviderEvent,
+      });
     } catch {
       summary.inconclusive += 1;
       continue;
