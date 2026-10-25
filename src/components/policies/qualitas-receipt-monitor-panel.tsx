@@ -11,6 +11,21 @@ import { checkQualitasReceipt, confirmQualitasReceiptPayment, configureQualitasR
 
 type CheckResult = Extract<Awaited<ReturnType<typeof checkQualitasReceipt>>, { ok: true }>["result"];
 
+function inconclusiveMessage(reason: string | undefined) {
+  switch (reason) {
+    case "FLOW_CHANGED":
+      return "El portal de Quálitas cambió su flujo de consulta. El recibo no se modificó.";
+    case "CHALLENGE":
+      return "Quálitas requiere una validación en su portal. El recibo no se modificó.";
+    case "PROVIDER_UNAVAILABLE":
+      return "Quálitas no respondió de forma concluyente. El recibo no se modificó.";
+    case "RECEIPT_DATE_NOT_FOUND":
+      return "No encontramos un vencimiento legible en la respuesta de Quálitas. El recibo no se modificó.";
+    default:
+      return "No se pudo confirmar el estado con suficiente certeza. El recibo no se modificó.";
+  }
+}
+
 export function QualitasReceiptMonitorPanel({
   policyId,
   policyNumber,
@@ -49,7 +64,7 @@ export function QualitasReceiptMonitorPanel({
       if (response.result.status === "PENDING") setMessage("Quálitas todavía muestra el recibo local como pendiente.");
       else if (response.result.status === "LIKELY_ADVANCED") setMessage("Quálitas ya muestra la siguiente parcialidad. El recibo anterior probablemente se pagó.");
       else if (response.result.status === "PORTAL_PAID") setMessage("Quálitas indica que la póliza ya está pagada. Confirma el recibo local si corresponde.");
-      else setMessage("No se pudo confirmar el estado con suficiente certeza. El recibo no cambió.");
+      else setMessage(inconclusiveMessage(response.result.reason));
     });
   }
 
