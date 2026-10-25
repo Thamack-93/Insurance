@@ -16,8 +16,11 @@ export function roundPremiumMoney(value: number) {
 
 /** Returns null until every component is explicitly captured. */
 export function deriveNetPremium(amount: number, breakdown: PremiumBreakdown): number | null {
-  const components = [breakdown.vatAmount, breakdown.issuanceExpenseAmount, breakdown.surchargeAmount, breakdown.discountAmount];
-  if (!Number.isFinite(amount) || amount < 0 || components.some((value) => value == null || !Number.isFinite(value) || value < 0)) return null;
+  const nonnegativeComponents = [breakdown.vatAmount, breakdown.issuanceExpenseAmount, breakdown.discountAmount];
+  const surcharge = breakdown.surchargeAmount;
+  if (!Number.isFinite(amount) || amount < 0
+    || nonnegativeComponents.some((value) => value == null || !Number.isFinite(value) || value < 0)
+    || surcharge == null || !Number.isFinite(surcharge)) return null;
   const net = roundPremiumMoney(amount - Number(breakdown.vatAmount) - Number(breakdown.issuanceExpenseAmount) - Number(breakdown.surchargeAmount) + Number(breakdown.discountAmount));
   return net < 0 ? null : net;
 }

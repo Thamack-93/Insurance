@@ -116,8 +116,35 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const productPlan = receipt.policy.paymentPlan?.trim().toUpperCase() || (typeof riskData.plan === "string" ? riskData.plan.trim().toUpperCase() : "") || "SIN_PLAN";
       const rules = parseCommissionRules(receipt.insurer.commissionRules);
       const policyRateOverride = receipt.policy.commissionRateOverride === null ? null : Number(receipt.policy.commissionRateOverride);
-      const rows = jsonUnitBreakdown(receipt.premiumBreakdownByUnit);
       const assets = receipt.policy.insuredAssets;
+      const storedRows = jsonUnitBreakdown(receipt.premiumBreakdownByUnit);
+      const aggregateComponents = premiumComponents(receipt);
+      const aggregateNetPremium = deriveReceiptNetPremium({
+        amount: Number(receipt.amount),
+        vatAmount: receipt.vatAmount === null ? null : Number(receipt.vatAmount),
+        issuanceExpenseAmount: receipt.issuanceExpenseAmount === null ? null : Number(receipt.issuanceExpenseAmount),
+        surchargeAmount: receipt.surchargeAmount === null ? null : Number(receipt.surchargeAmount),
+        discountAmount: receipt.discountAmount === null ? null : Number(receipt.discountAmount),
+      });
+      const storedNetPremium = deriveReceiptNetPremium({ amount: Number(receipt.amount), premiumBreakdownByUnit: storedRows });
+      const singleUnitBreakdownConflicts = assets.length === 1
+        && aggregateNetPremium !== null
+        && storedNetPremium !== null
+        && Math.abs(aggregateNetPremium - storedNetPremium) > 0.01;
+      // A single insured asset has no allocation ambiguity: use the receipt-level
+      // premium breakdown as that unit's breakdown when its stored unit rows are
+      // missing, incomplete, or fail to reconcile.
+      // Multi-unit policies still require an explicit, reconciling allocation.
+      const rows = assets.length === 1 && aggregateComponents && storedNetPremium === null
+        ? [{
+            insuredAssetId: assets[0].id,
+            totalPremium: aggregateComponents.totalPremium,
+            vatAmount: aggregateComponents.iva,
+            issuanceExpenseAmount: aggregateComponents.issuanceExpense,
+            surchargeAmount: aggregateComponents.installmentSurcharge,
+            discountAmount: aggregateComponents.visibleDiscounts,
+          }]
+        : storedRows;
       const calculations: Array<{ assetId: string | null; description: string; unitClass: string; components: CommissionPremiumComponents; estimate: CommissionEstimate & { amount: number; commissionableBase: number; rate: number; rule: CommissionRule } }> = [];
       let reviewReason: string | null = null;
 
@@ -126,7 +153,9 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       // can calculate; otherwise calculateCommissionEstimate leaves the receipt in REVIEW.
       if (assets.length) {
         const byAsset = new Map(rows.map((row) => [row.insuredAssetId, row]));
-        if (deriveReceiptNetPremium({ amount: Number(receipt.amount), premiumBreakdownByUnit: rows }) === null) {
+        if (singleUnitBreakdownConflicts) {
+          reviewReason = "El desglose del recibo y el desglose de su única unidad difieren; concílialos antes de calcular.";
+        } else if (deriveReceiptNetPremium({ amount: Number(receipt.amount), premiumBreakdownByUnit: rows }) === null) {
           reviewReason = "El desglose de prima por unidad está incompleto o no concilia con el importe del recibo.";
         } else if (byAsset.size !== assets.length || assets.some((asset) => !byAsset.has(asset.id)) || rows.some((row) => !assets.some((asset) => asset.id === row.insuredAssetId))) {
           reviewReason = "Completa el desglose de prima por cada unidad asegurada antes de calcular.";

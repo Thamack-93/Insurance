@@ -71,8 +71,36 @@ export function ReceiptForm({
   const selectedAssets = useMemo(() => selectedPolicyId ? policyAssets[selectedPolicyId] ?? [] : [], [selectedPolicyId, policyAssets]);
 
   useEffect(() => {
-    if (!selectedAssets.length) {
-      setValue("premiumBreakdownByUnit", []);
+    if (selectedAssets.length <= 1) {
+      if (selectedAssets.length === 1) {
+        const legacyUnit = getValues("premiumBreakdownByUnit").find((row) => row.insuredAssetId === selectedAssets[0].id);
+        const aggregateFields = [
+          ["vatAmount", "vatAmount"],
+          ["issuanceExpenseAmount", "issuanceExpenseAmount"],
+          ["surchargeAmount", "surchargeAmount"],
+          ["discountAmount", "discountAmount"],
+        ] as const;
+        // Move legacy single-unit values into receipt-level fields when needed.
+        // Keep any legacy row until the aggregate fields are complete so editing
+        // an older receipt never discards its only captured component values.
+        if (legacyUnit) {
+          for (const [receiptField, unitField] of aggregateFields) {
+            const current = getValues(receiptField);
+            if ((current === "" || current === undefined) && legacyUnit[unitField] !== "" && legacyUnit[unitField] !== undefined) {
+              setValue(receiptField, legacyUnit[unitField]);
+            }
+          }
+          const aggregateIsComplete = aggregateFields.every(([receiptField]) => {
+            const value = getValues(receiptField);
+            return value !== "" && value !== undefined;
+          });
+          setValue("premiumBreakdownByUnit", aggregateIsComplete ? [] : [legacyUnit]);
+        } else {
+          setValue("premiumBreakdownByUnit", []);
+        }
+      } else {
+        setValue("premiumBreakdownByUnit", []);
+      }
       return;
     }
     const existing = new Map(getValues("premiumBreakdownByUnit").map((field) => [field.insuredAssetId, field]));
@@ -193,7 +221,7 @@ export function ReceiptForm({
           </FormSection>
 
           <FormSection title="Datos para calcular la prima neta" description="Captura los importes que aparecen en el recibo: prima total − IVA − gastos de expedición − recargo fraccionado + descuentos visibles = prima neta.">
-            {selectedAssets.length ? (
+            {selectedAssets.length > 1 ? (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">Captura cada concepto por bien o persona asegurada; la tasa puede cambiar según su clasificación.</p>
                 {selectedAssets.map((asset, index) => (
