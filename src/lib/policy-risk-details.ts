@@ -104,7 +104,9 @@ export function hasPolicyRiskData(value: unknown): boolean {
     if (item && typeof item === "object") return Object.values(item).some(hasValue);
     return false;
   };
-  return hasValue(parsed.data.data);
+  return hasValue(parsed.data.data)
+    || Boolean(parsed.data.commissionPolicyMode?.trim())
+    || Boolean(parsed.data.commissionUnitClass?.trim());
 }
 
 const detailLabels: Record<string, string> = {
