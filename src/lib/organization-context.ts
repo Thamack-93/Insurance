@@ -316,9 +316,12 @@ export async function withSystemOrganizationTransaction<T>(
       organization.status === "PROVISIONING" &&
       reason === "demo provision";
     const approvedDemoMaintenance = organization.kind === "DEMO" && ["demo file retention", "demo reset", "demo summary"].includes(reason);
+    // Retention is an explicit platform maintenance operation and must still
+    // run for suspended tenants so expired bonus snapshots cannot accumulate.
+    const approvedBonusRunRetention = reason === "bonus run retention";
     const approvedCapabilityRead = reason === "capability resolution";
     const approvedLifecycle = ["demo trial extend", "demo trial suspend", "organization suspend", "organization reactivate"].includes(reason);
-    if (!activeOrProvisioning && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
+    if (!activeOrProvisioning && !approvedDemoMaintenance && !approvedBonusRunRetention && !approvedLifecycle && !approvedCapabilityRead) {
       throw new AuthError("ORGANIZATION_NOT_ACTIVE", 403);
     }
     const runtimeState = await tx.platformRuntimeState.findUnique({ where: { id: 1 }, select: { writeMode: true } }).catch((error) => {
@@ -327,7 +330,7 @@ export async function withSystemOrganizationTransaction<T>(
     });
     const approvedDemoProvisioningDuringMaintenance =
       runtimeState?.writeMode === "MAINTENANCE" && approvedDemoProvisioning;
-    if (runtimeState && runtimeState.writeMode !== "OPEN" && !approvedDemoProvisioningDuringMaintenance && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
+    if (runtimeState && runtimeState.writeMode !== "OPEN" && !approvedDemoProvisioningDuringMaintenance && !approvedDemoMaintenance && !approvedBonusRunRetention && !approvedLifecycle && !approvedCapabilityRead) {
       throw new AuthError("POLICYDESK_MAINTENANCE_MODE", 503);
     }
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
