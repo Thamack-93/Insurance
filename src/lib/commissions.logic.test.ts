@@ -30,6 +30,11 @@ describe("commissions.logic", () => {
     expect(result).toMatchObject({ status: "CALCULATED", netPremium: 870, commissionableBase: 870, rate: 8, amount: 69.6 });
   });
 
+  it("supports a negative installment surcharge without rejecting a valid net premium", () => {
+    const result = calculateCommissionEstimate({ totalPremium: 12200.06, iva: 1682.77, issuanceExpense: 670, installmentSurcharge: -200.97, visibleDiscounts: 0 }, [baseRule], dimensions, new Date("2026-06-01T12:00:00Z"));
+    expect(result).toMatchObject({ status: "CALCULATED", netPremium: 10048.26, commissionableBase: 10048.26, rate: 8, amount: 803.86 });
+  });
+
   it("selects a more specific class and requires review for no match or a tie", () => {
     const wildcard = { ...baseRule, id: "wildcard", unitClass: "*", rate: 10 };
     const specific = { ...baseRule, id: "specific", rate: 8 };
