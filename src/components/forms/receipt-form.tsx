@@ -34,7 +34,7 @@ type ReceiptFormProps = {
   defaultValues: ReceiptFormValues;
   policyOptions: SelectOption[];
   policyAssets: Record<string, Array<{ id: string; description: string; unitClass: string | null }>>;
-  endorsementOptions?: SelectOption[];
+  endorsementOptionsByPolicy?: Record<string, SelectOption[]>;
   submitAction: (values: ReceiptFormValues) => Promise<MutationResult>;
   footerActions?: ReactNode;
 };
@@ -47,7 +47,7 @@ export function ReceiptForm({
   defaultValues,
   policyOptions,
   policyAssets,
-  endorsementOptions,
+  endorsementOptionsByPolicy,
   submitAction,
   footerActions,
 }: ReceiptFormProps) {
@@ -68,6 +68,7 @@ export function ReceiptForm({
     defaultValues,
   });
   const selectedPolicyId = useWatch({ control, name: "policyId" });
+  const selectedEndorsementOptions = endorsementOptionsByPolicy?.[selectedPolicyId ?? ""] ?? [];
   const selectedAssets = useMemo(() => selectedPolicyId ? policyAssets[selectedPolicyId] ?? [] : [], [selectedPolicyId, policyAssets]);
 
   useEffect(() => {
@@ -121,7 +122,10 @@ export function ReceiptForm({
                   render={({ field }) => (
                     <ControlledSelect
                       value={field.value}
-                      onValueChange={field.onChange}
+                      onValueChange={(value) => {
+                        if (value !== field.value) setValue("endorsementId", "");
+                        field.onChange(value);
+                      }}
                       options={policyOptions}
                       placeholder="Selecciona una póliza"
                     />
@@ -129,7 +133,7 @@ export function ReceiptForm({
                 />
               </FormField>
 
-              {endorsementOptions && endorsementOptions.length > 0 ? (
+              {selectedEndorsementOptions.length > 0 ? (
                 <FormField label="Endoso" error={errors.endorsementId?.message}>
                   <Controller
                     name="endorsementId"
@@ -138,7 +142,7 @@ export function ReceiptForm({
                       <ControlledSelect
                         value={field.value || ""}
                         onValueChange={field.onChange}
-                        options={endorsementOptions}
+                        options={selectedEndorsementOptions}
                         placeholder="Selecciona un endoso"
                       />
                     )}
