@@ -16,7 +16,7 @@ import {
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
 import { deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
-import { calculateCommissionEstimate, parseCommissionRules, roundMoney, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
+import { calculateCommissionEstimate, parseCommissionRules, roundMoney, shouldUseAggregatePolicyOverride, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
 
 type CommissionScope = {
   organizationId: string;
@@ -182,6 +182,12 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const calculationRows = receipt.endorsementId ? positiveEndorsementRows : rows;
       const calculations: Array<{ assetId: string | null; description: string; unitClass: string; components: CommissionPremiumComponents; estimate: CommissionEstimate & { amount: number; commissionableBase: number; rate: number; rule: CommissionRule } }> = [];
       let reviewReason: string | null = null;
+      const aggregatePolicyOverride = shouldUseAggregatePolicyOverride({
+        hasInsuredAssets: assets.length > 0,
+        policyRateOverride,
+        aggregateComponents,
+        unitBreakdownCount: storedRows.length,
+      });
 
       // An empty modality can still resolve to a rule configured with policyMode="*".
       // If the insurer differentiates rates by modality, only a matching specific rule
@@ -198,7 +204,18 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
         const calculationAssets = receipt.endorsementId
           ? assets.filter((asset) => byAsset.has(asset.id) && endorsementPartyIds?.has(asset.id))
           : assets;
-        if (singleUnitBreakdownConflicts) {
+        if (aggregatePolicyOverride && aggregateComponents) {
+          if (receipt.endorsementId && endorsementPartyIds?.size !== 1) {
+            reviewReason = "El endoso no identifica con claridad a la persona cuyo importe se desglosa.";
+          } else if (aggregateComponents.totalPremium <= 0) {
+            reviewReason = "Captura la prima total antes de calcular.";
+          } else {
+            const unitClass = policyUnitClass || "POLICY_OVERRIDE";
+            const estimate = calculateCommissionEstimate(aggregateComponents, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass, paymentFrequency: receipt.policy.paymentFrequency }, ruleDate, policyRateOverride);
+            if (estimate.status !== "CALCULATED" || estimate.amount === undefined) reviewReason = estimate.reason ?? "Revisa los datos de comisión.";
+            else calculations.push({ assetId: null, description: "Póliza (tasa específica)", unitClass, components: aggregateComponents, estimate: estimate as typeof calculations[number]["estimate"] });
+          }
+        } else if (singleUnitBreakdownConflicts) {
           reviewReason = "El desglose del recibo y el desglose de su única unidad difieren; concílialos antes de calcular.";
         } else if (deriveReceiptNetPremium({ amount: Number(receipt.amount), premiumBreakdownByUnit: rows }) === null) {
           reviewReason = "El desglose de prima por unidad está incompleto o no concilia con el importe del recibo.";
