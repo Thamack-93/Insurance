@@ -9,7 +9,7 @@ const vehicles = z.array(z.object({ make: text, model: text, year, version: text
 const locations = z.array(z.object({ address: text, use: text, construction: text, activity: text, insuredValue: text, unitClass: text })).max(100).default([]);
 
 const dataSchemas = {
-  AUTO: z.object({ policyMode: text, vehicles }),
+  AUTO: z.object({ vehicles }),
   GMM: z.object({ insuredPeople: people, plan: text, insuredAmount: text, deductible: text, coinsurance: text }),
   VIDA: z.object({ insuredPeople: people, plan: text, insuredAmount: text, term: text, beneficiaries: z.array(z.object({ fullName: text, relationship: text, percentage: text })).max(100).default([]) }),
   DANOS: z.object({ locations, activity: text, coverageLimit: text }),
@@ -22,8 +22,9 @@ const dataSchemas = {
 } satisfies Record<PolicyType, z.ZodType>;
 
 const riskEnvelope = { version: z.literal(1), sourceText: z.string().trim().max(4000).optional(), commissionPolicyMode: text, commissionUnitClass: text };
+const autoRiskEnvelope = { version: z.literal(1), sourceText: z.string().trim().max(4000).optional(), commissionUnitClass: text };
 export const policyRiskDetailsSchema = z.discriminatedUnion("policyType", [
-  z.object({ ...riskEnvelope, policyType: z.literal("AUTO"), data: dataSchemas.AUTO }),
+  z.object({ ...autoRiskEnvelope, policyType: z.literal("AUTO"), data: z.object({ vehicles }) }),
   z.object({ ...riskEnvelope, policyType: z.literal("GMM"), data: dataSchemas.GMM }),
   z.object({ ...riskEnvelope, policyType: z.literal("VIDA"), data: dataSchemas.VIDA }),
   z.object({ ...riskEnvelope, policyType: z.literal("DANOS"), data: dataSchemas.DANOS }),
@@ -42,7 +43,7 @@ export type RiskDetailsValue = Record<string, unknown>;
 export function emptyPolicyRiskDetails(policyType: PolicyType): PolicyRiskDetails {
   const base = { version: 1 as const, policyType, commissionPolicyMode: "", commissionUnitClass: "" };
   switch (policyType) {
-    case "AUTO": return { ...base, policyType, data: { policyMode: "", vehicles: [{ make: "", model: "", year: "", version: "", vin: "", plates: "", unitClass: "" }] } };
+    case "AUTO": return { version: 1, policyType, commissionUnitClass: "", data: { vehicles: [{ make: "", model: "", year: "", version: "", vin: "", plates: "", unitClass: "" }] } };
     case "GMM": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "", unitClass: "" }], plan: "", insuredAmount: "", deductible: "", coinsurance: "" } };
     case "VIDA": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "", unitClass: "" }], plan: "", insuredAmount: "", term: "", beneficiaries: [{ fullName: "", relationship: "", percentage: "" }] } };
     case "DANOS": return { ...base, policyType, data: { locations: [{ address: "", use: "", construction: "", activity: "", insuredValue: "", unitClass: "" }], activity: "", coverageLimit: "" } };
@@ -68,7 +69,7 @@ export function summarizePolicyRiskDetails(value: unknown): string | null {
   if (!parsed.success) return null;
   const { policyType, data } = parsed.data;
   switch (policyType) {
-    case "AUTO": return join([data.policyMode, ...data.vehicles.map((vehicle) => join([vehicle.make, vehicle.model, vehicle.year, vehicle.version, vehicle.unitClass, vehicle.plates ? `Placas ${vehicle.plates}` : "", vehicle.vin ? `Serie ${vehicle.vin}` : ""], " "))]);
+    case "AUTO": return join(data.vehicles.map((vehicle) => join([vehicle.make, vehicle.model, vehicle.year, vehicle.version, vehicle.unitClass, vehicle.plates ? `Placas ${vehicle.plates}` : "", vehicle.vin ? `Serie ${vehicle.vin}` : ""], " ")));
     case "GMM": return join([data.plan, data.insuredAmount ? `Suma asegurada ${data.insuredAmount}` : "", ...data.insuredPeople.map((person) => person.fullName)]);
     case "VIDA": return join([data.plan, data.insuredAmount ? `Suma asegurada ${data.insuredAmount}` : "", ...data.insuredPeople.map((person) => person.fullName)]);
     case "DANOS": return join([data.activity, ...data.locations.map((location) => join([location.address, location.use, location.activity, location.insuredValue ? `Valor ${location.insuredValue}` : ""], ", ")), data.coverageLimit]);

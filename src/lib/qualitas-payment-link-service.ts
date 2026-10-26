@@ -72,6 +72,9 @@ function isPrepared(value: QualitasPreparedPaymentLink | QualitasPaymentLinkResu
 }
 function outcomeMessage(outcome: QualitasPaymentLinkOutcome, reason: QualitasPaymentLinkReason) {
   if (reason === "AUTHORIZATION_RECHECK_FAILED") return "No se pudo volver a validar la autorización; no se envió la liga. Actualiza la sesión antes de intentarlo de nuevo.";
+  if (reason === "ACCESS_REJECTED") return outcome === "UNCERTAIN_POST_SUBMISSION"
+    ? "Quálitas rechazó el acceso después del envío. No se pudo confirmar el resultado; verifica el canal antes de volver a solicitar para evitar duplicados."
+    : "Quálitas rechazó el acceso desde el servidor de consulta. No se envió una nueva solicitud; pide al proveedor habilitar el acceso.";
   if (outcome === "SUCCESS") return "La solicitud fue enviada a Quálitas.";
   if (outcome === "ALREADY_IN_PROGRESS" || reason === "DUPLICATE_LINK_99991") {
     return "Quálitas indica que ya existe una liga de pago en proceso para esta póliza.";
@@ -329,6 +332,9 @@ export async function requestQualitasPaymentLinkForReceipt(
           phase: event.phase,
           ...(event.status ? { status: event.status } : {}),
           ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+          ...(event.redirectCount !== undefined ? { redirectCount: event.redirectCount } : {}),
+          ...(event.bodyBytes !== undefined ? { bodyBytes: event.bodyBytes } : {}),
+          ...(event.rejectionClassification ? { rejectionClassification: event.rejectionClassification } : {}),
           ...(event.finalSubmission !== undefined ? { finalSubmission: event.finalSubmission } : {}),
           ...(event.hasPolicyForm !== undefined ? { hasPolicyForm: event.hasPolicyForm } : {}),
           ...(event.policyFormMethod !== undefined ? { policyFormMethod: event.policyFormMethod } : {}),

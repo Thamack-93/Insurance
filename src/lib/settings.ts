@@ -57,13 +57,11 @@ export async function getSettings(options: {
       throw new AuthError("ORGANIZATION_CONTEXT_MISMATCH", 403);
     }
     // Get all settings from database
-    const [organizationSettings, platformSettings, userTheme] = await Promise.all([
-      snapshot
-        ? Promise.resolve(snapshot.settings)
-        : withTenantTransaction(context, (tx) => tx.organizationSetting.findMany({ where: { organizationId: context.organizationId } })),
-      db.systemSetting.findMany({ where: { key: { not: { startsWith: "theme:" } } } }),
-      db.userPreference.findUnique({ where: { userId_key: { userId: user.id, key: "theme" } }, select: { value: true } }),
-    ]);
+    const organizationSettings = snapshot
+      ? snapshot.settings
+      : await withTenantTransaction(context, (tx) => tx.organizationSetting.findMany({ where: { organizationId: context.organizationId } }));
+    const platformSettings = await db.systemSetting.findMany({ where: { key: { not: { startsWith: "theme:" } } } });
+    const userTheme = await db.userPreference.findUnique({ where: { userId_key: { userId: user.id, key: "theme" } }, select: { value: true } });
     
     // Convert to object
     const settingsMap = [...platformSettings, ...organizationSettings].reduce<Record<string, string>>((acc, setting) => {

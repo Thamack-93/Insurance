@@ -13,6 +13,8 @@ type CheckResult = Extract<Awaited<ReturnType<typeof checkQualitasReceipt>>, { o
 
 function inconclusiveMessage(reason: string | undefined) {
   switch (reason) {
+    case "ACCESS_REJECTED":
+      return "Quálitas rechazó el acceso desde el servidor de consulta. El recibo no se modificó; se requiere habilitación del proveedor.";
     case "FLOW_CHANGED":
       return "El portal de Quálitas cambió su flujo de consulta. El recibo no se modificó.";
     case "CHALLENGE":
@@ -64,7 +66,9 @@ export function QualitasReceiptMonitorPanel({
       if (response.result.status === "PENDING") setMessage("Quálitas todavía muestra el recibo local como pendiente.");
       else if (response.result.status === "LIKELY_ADVANCED") setMessage("Quálitas ya muestra la siguiente parcialidad. El recibo anterior probablemente se pagó.");
       else if (response.result.status === "PORTAL_PAID") setMessage("Quálitas indica que la póliza ya está pagada. Confirma el recibo local si corresponde.");
-      else setMessage(inconclusiveMessage(response.result.reason));
+      else if (response.result.reason === "DUE_DATE_MISMATCH") {
+        setMessage("La fecha de Quálitas no coincide con la fecha local. Revisión pendiente; el recibo no se modificó.");
+      } else setMessage(inconclusiveMessage(response.result.reason));
     });
   }
 
@@ -113,6 +117,11 @@ export function QualitasReceiptMonitorPanel({
             <div className="rounded-xl border bg-muted/30 p-3 text-sm">
               <p className="font-medium">Recibo {result.targetReceipt.receiptNumber} · vence {formatDate(result.targetReceipt.dueDate)}</p>
               <p className="text-muted-foreground">{formatCurrency(result.targetReceipt.amount, result.targetReceipt.currency)} · Consulta {formatDate(result.checkedAt)}</p>
+              {result.portalDueDate && result.portalDueDate !== result.targetReceipt.dueDate ? (
+                <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-amber-900 dark:text-amber-200">
+                  Revisión pendiente: vencimiento local {formatDate(result.targetReceipt.dueDate)}; vencimiento en Quálitas {formatDate(result.portalDueDate)}. No se cambió la fecha ni el estado.
+                </p>
+              ) : null}
               {result.status === "PORTAL_PAID" ? <p className="text-muted-foreground">Quálitas reportó la póliza como pagada.</p> : null}
               {result.portalDueDate ? <p className="text-muted-foreground">Siguiente vencimiento visto en Quálitas: {formatDate(result.portalDueDate)}</p> : null}
               {["LIKELY_ADVANCED", "PORTAL_PAID"].includes(result.status) ? (
