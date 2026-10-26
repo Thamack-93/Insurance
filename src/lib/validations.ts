@@ -21,12 +21,13 @@ const requiredDate = z.string().min(1, "Selecciona una fecha.");
 const optionalDate = z.string().optional().or(z.literal(""));
 const commissionMoney = z.union([z.literal(""), z.coerce.number().nonnegative("El importe no puede ser negativo.")]).optional();
 const optionalPolicyMoney = commissionMoney;
+const financingMoney = z.union([z.literal(""), z.coerce.number()]).optional();
 const receiptCommissionUnitSchema = z.object({
   insuredAssetId: z.string().min(1),
   totalPremium: commissionMoney,
   vatAmount: commissionMoney,
   issuanceExpenseAmount: commissionMoney,
-  surchargeAmount: commissionMoney,
+  surchargeAmount: financingMoney,
   discountAmount: commissionMoney,
 });
 
@@ -90,7 +91,7 @@ const policyBaseSchema = z
     endDate: requiredDate,
     premiumAmount: z.coerce.number().positive("La prima debe ser mayor a cero."),
     premiumIssuanceExpenseAmount: optionalPolicyMoney,
-    premiumSurchargeAmount: optionalPolicyMoney,
+    premiumSurchargeAmount: financingMoney,
     premiumDiscountAmount: optionalPolicyMoney,
     commissionRateOverride: z.union([
       z.literal(""),
@@ -168,7 +169,7 @@ export const receiptSchema = z
     amount: z.coerce.number().positive("El monto debe ser mayor a cero."),
     vatAmount: commissionMoney,
     issuanceExpenseAmount: commissionMoney,
-    surchargeAmount: commissionMoney,
+    surchargeAmount: financingMoney,
     discountAmount: commissionMoney,
     premiumBreakdownByUnit: z.array(receiptCommissionUnitSchema).max(100).default([]),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
