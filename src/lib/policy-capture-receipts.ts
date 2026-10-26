@@ -121,8 +121,9 @@ function roundMoney(value: number) {
 
 function allocateProportionally(total: number, weights: number[]) {
   const weightTotal = weights.reduce((sum, weight) => sum + Math.max(0, weight), 0);
-  if (total < 0 || weightTotal <= 0) return weights.map(() => null);
-  const totalCents = Math.round((total + Number.EPSILON) * 100);
+  if (weightTotal <= 0) return weights.map(() => null);
+  const sign = total < 0 ? -1 : 1;
+  const totalCents = Math.round((Math.abs(total) + Number.EPSILON) * 100);
   const rawCents = weights.map((weight) => totalCents * Math.max(0, weight) / weightTotal);
   const cents = rawCents.map(Math.floor);
   let remainingCents = totalCents - cents.reduce((sum, value) => sum + value, 0);
@@ -132,7 +133,7 @@ function allocateProportionally(total: number, weights: number[]) {
   for (let position = 0; remainingCents > 0 && position < remainderOrder.length; position += 1, remainingCents -= 1) {
     cents[remainderOrder[position]!.index]! += 1;
   }
-  return cents.map((value) => value / 100);
+  return cents.map((value) => sign * value / 100);
 }
 
 function allocateBreakdownAcrossAmounts(breakdown: PolicyPremiumTotals | undefined, amounts: number[]) {
