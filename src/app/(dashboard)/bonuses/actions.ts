@@ -6,7 +6,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { Prisma } from "@/generated/prisma/client";
 import { businessToday } from "@/lib/business-dates";
 import { assertOrganizationContextInTransaction, requireOrganizationRole, withTenantTransaction } from "@/lib/organization-context";
-import { BONUS_RULE_SOURCE_HASH, resolveBonusProgram } from "@/lib/bonus-rules";
+import { BONUS_RULE_SOURCE_HASH, resolveBonusProgram, selectBonusTier, type BonusProgram } from "@/lib/bonus-rules";
 import { calculateBonusProjection, decimalOrNull } from "@/lib/bonus-calculation";
 import { autoFleetEligibilityFromInventory, damagePortfolioLossRatioEvidenceSchema, parseBonusEligibilityEvidence, recordBonusEvidenceReview } from "@/lib/bonus-evidence";
 
@@ -229,6 +229,96 @@ export async function confirmAutoBonusEvidenceBatch(formData: FormData) {
 
   revalidatePath("/bonuses");
   redirect(`/bonuses?autosConfirmed=${result.confirmed}&autosExcluded=${result.excluded}&autosPendingInventory=${result.pendingInventory}`);
+}
+
+/**
+ * Records an administrator's explicit acceptance of the current run's
+ * unit-allocated net premium for one policy. This is a run snapshot override;
+ * recalculating the run re-evaluates the source data and requires review again.
+ */
+export async function acceptBonusRunPolicyPremium(formData: FormData) {
+  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const runId = String(formData.get("runId") ?? "").trim();
+  const policyId = String(formData.get("policyId") ?? "").trim();
+  const expectedVersion = Number(formData.get("version"));
+  if (!runId || !policyId || !Number.isInteger(expectedVersion) || formData.get("reviewAttestation") !== "on") {
+    throw new Error("Confirma la revisión de prima y vuelve a abrir la proyección actualizada.");
+  }
+
+  const acceptedCount = await withTenantTransaction(context, async (tx) => {
+    await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "BonusRun" WHERE "id" = ${runId} AND "organizationId" = ${context.organizationId} FOR UPDATE`);
+    const run = await tx.bonusRun.findFirst({
+      where: { id: runId, organizationId: context.organizationId },
+      include: { ruleSet: true, items: true },
+    });
+    if (!run) throw new Error("El cierre no existe en esta organización.");
+    if (run.status === "APPROVED") throw new Error("El cierre aprobado es inmutable.");
+    if (run.version !== expectedVersion) throw new Error("La proyección cambió desde que la abriste; vuelve a revisarla.");
+
+    const targetItems = run.items.filter((item) => item.policyId === policyId && item.status === "REVIEW");
+    const reason = "PNP derivada del desglose por unidad; validar contra el recibo individual antes de aprobar.";
+    if (!targetItems.length || targetItems.some((item) => item.reason !== reason || item.paymentId === null || item.netPremiumPaid === null || item.eligibleAmount === null)) {
+      throw new Error("La póliza no tiene partidas exclusivamente pendientes por la PNP derivada con importes completos.");
+    }
+
+    const acceptedAt = new Date().toISOString();
+    const paymentIds = new Set(targetItems.map((item) => item.paymentId));
+    for (const item of targetItems) {
+      const evidence = item.evidenceJson ? JSON.parse(item.evidenceJson) as Record<string, unknown> : {};
+      await tx.bonusRunItem.update({
+        where: { id: item.id, organizationId: context.organizationId },
+        data: {
+          status: "INCLUDED",
+          reason: `PNP por desglose de unidad aceptada por administración para esta proyección el ${acceptedAt}.`,
+          evidenceJson: JSON.stringify({ ...evidence, administratorPremiumAcceptance: { acceptedById: context.userId, acceptedAt, scope: "THIS_BONUS_RUN_ONLY", acceptedNetPremiumPaid: item.netPremiumPaid?.toString() ?? null } }),
+          version: { increment: 1 },
+        },
+      });
+    }
+
+    const refreshedItems = run.items.map((item) => paymentIds.has(item.paymentId) ? { ...item, status: "INCLUDED", reason: `PNP por desglose de unidad aceptada por administración para esta proyección el ${acceptedAt}.` } : item);
+    const baseAmount = refreshedItems.reduce((sum, item) => sum.add(item.status === "INCLUDED" ? item.eligibleAmount ?? 0 : 0), new Prisma.Decimal(0));
+    const baseAmountNumber = baseAmount.toNumber();
+    let rule: BonusProgram;
+    try { rule = JSON.parse(run.ruleSet.rulesJson) as BonusProgram; }
+    catch { throw new Error("No se pudieron leer las reglas versionadas de esta proyección."); }
+    const tier = selectBonusTier(baseAmountNumber, rule.tiers);
+    const bonusRate = rule.eligibilityOnly ? null : tier?.rate ?? null;
+    const bonusAmount = rule.eligibilityOnly || bonusRate === null ? null : baseAmount.mul(String(bonusRate)).toDecimalPlaces(2).toFixed(2);
+    let snapshot: Record<string, unknown>;
+    try { snapshot = JSON.parse(run.snapshotJson) as Record<string, unknown>; }
+    catch { throw new Error("No se pudo leer el snapshot de la proyección; no se guardaron cambios."); }
+    const projection = snapshot.projection && typeof snapshot.projection === "object" ? snapshot.projection as Record<string, unknown> : {};
+    const previousProjectionReviewReasons = Array.isArray(projection.reviewReasons) ? projection.reviewReasons.filter((value): value is string => typeof value === "string") : [];
+    const previousItemReviewReasons = new Set(run.items.filter((item) => item.status === "REVIEW").map((item) => item.reason).filter((value): value is string => Boolean(value)));
+    const runLevelReviewReasons = previousProjectionReviewReasons.filter((value) => !previousItemReviewReasons.has(value));
+    const reviewReasons = [...new Set([...runLevelReviewReasons, ...refreshedItems.filter((item) => item.status === "REVIEW").map((item) => item.reason).filter((value): value is string => Boolean(value))])];
+    const projectionItems = Array.isArray(projection.items) ? projection.items as Array<Record<string, unknown>> : [];
+    const updatedProjectionItems = projectionItems.map((item) => paymentIds.has(typeof item.paymentId === "string" ? item.paymentId : null)
+      ? { ...item, status: "INCLUDED", reason: `PNP por desglose de unidad aceptada por administración para esta proyección el ${acceptedAt}.`, evidence: { ...(item.evidence && typeof item.evidence === "object" ? item.evidence as Record<string, unknown> : {}), administratorPremiumAcceptance: { acceptedById: context.userId, acceptedAt, scope: "THIS_BONUS_RUN_ONLY" } } }
+      : item);
+    const snapshotJson = JSON.stringify({ ...snapshot, projection: { ...projection, items: updatedProjectionItems, baseAmount: baseAmount.toFixed(2), bonusRate, bonusAmount, status: reviewReasons.length ? "REVIEW" : "READY", reviewReasons } });
+
+    await tx.bonusRun.update({
+      where: { id: run.id, organizationId: context.organizationId },
+      data: {
+        baseAmount: baseAmount.toFixed(2), bonusRate: decimalOrNull(bonusRate === null ? null : String(bonusRate)),
+        bonusAmount: decimalOrNull(bonusAmount), reviewReasonsJson: JSON.stringify(reviewReasons), snapshotJson,
+        status: reviewReasons.length ? "REVIEW" : "READY", version: { increment: 1 },
+      },
+    });
+    await writeActivityLog({
+      organizationId: context.organizationId, entityType: "BonusRun", entityId: run.id,
+      action: "BONUS_RUN_POLICY_PREMIUM_ACCEPT",
+      oldValue: { status: run.status, baseAmount: run.baseAmount.toString(), bonusAmount: run.bonusAmount?.toString() ?? null },
+      newValue: { policyId, paymentIds: [...paymentIds], acceptedNetPremiumPaid: targetItems.reduce((sum, item) => sum.add(item.netPremiumPaid ?? 0), new Prisma.Decimal(0)).toFixed(2), scope: "THIS_BONUS_RUN_ONLY", baseAmount: baseAmount.toFixed(2), bonusAmount, version: run.version + 1 },
+      userId: context.userId, db: tx,
+    });
+    return targetItems.length;
+  });
+  revalidatePath("/bonuses");
+  redirect(`/bonuses?run=${encodeURIComponent(runId)}&premiumAccepted=${acceptedCount}`);
 }
 
 export async function approveBonusRun(formData: FormData) {

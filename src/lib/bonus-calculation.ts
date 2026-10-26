@@ -148,7 +148,19 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       discountAmount: receipt.discountAmount === null ? null : n(receipt.discountAmount),
       premiumBreakdownByUnit: breakdown.length ? breakdown : null,
     });
-    const netPremiumFromUnitBreakdown = calculatedNet !== null && breakdown.length > 0;
+    const hasCompleteReceiptComponents = receipt.vatAmount !== null
+      && receipt.issuanceExpenseAmount !== null
+      && receipt.surchargeAmount !== null
+      && receipt.discountAmount !== null;
+    const onlyUnit = breakdown.length === 1 ? breakdown[0] : null;
+    const singleUnitMatchesReceipt = Boolean(onlyUnit && hasCompleteReceiptComponents
+      && [onlyUnit.totalPremium, onlyUnit.vatAmount, onlyUnit.issuanceExpenseAmount, onlyUnit.surchargeAmount, onlyUnit.discountAmount].every(Number.isFinite)
+      && Math.abs(onlyUnit.totalPremium - n(receipt.amount)) <= 0.01
+      && Math.abs(n(onlyUnit.vatAmount) - n(receipt.vatAmount)) <= 0.01
+      && Math.abs(n(onlyUnit.issuanceExpenseAmount) - n(receipt.issuanceExpenseAmount)) <= 0.01
+      && Math.abs(n(onlyUnit.surchargeAmount) - n(receipt.surchargeAmount)) <= 0.01
+      && Math.abs(n(onlyUnit.discountAmount) - n(receipt.discountAmount)) <= 0.01);
+    const netPremiumFromUnitBreakdown = calculatedNet !== null && breakdown.length > 0 && !singleUnitMatchesReceipt;
     const currencyMismatch = receiptPayments.some((payment) => payment.currency.toUpperCase() !== receipt.currency.toUpperCase());
     const relevantReconciliation = receipt.endorsementId
       ? endorsementReconciliation.get(receipt.endorsementId)
