@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { allocatePaidNetPremium, deriveNetPremium, deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "./premium-breakdown";
+import { allocatePaidNetPremium, deriveNetPremium, deriveReceiptNetPremium, policyPremiumBreakdownChanged, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "./premium-breakdown";
 
 describe("shared receipt premium breakdown", () => {
   it("derives prima neta with the user-confirmed signs", () => {
     expect(deriveNetPremium(1160, { vatAmount: 160, issuanceExpenseAmount: 20, surchargeAmount: 10, discountAmount: 30 })).toBe(1000);
+    expect(deriveNetPremium(1160, { vatAmount: 160, issuanceExpenseAmount: 20, surchargeAmount: -10, discountAmount: 30 })).toBe(1020);
+  });
+
+  it("detects policy breakdown changes without treating unchanged totals as a receipt resync", () => {
+    const saved = { vatAmount: 160, issuanceExpenseAmount: 20, surchargeAmount: -10, discountAmount: 30 };
+    expect(policyPremiumBreakdownChanged(saved, { ...saved })).toBe(false);
+    expect(policyPremiumBreakdownChanged(saved, { ...saved, surchargeAmount: -11 })).toBe(true);
+    expect(policyPremiumBreakdownChanged({ vatAmount: null }, { vatAmount: 0 })).toBe(true);
   });
 
   it("requires every component and rejects a negative result", () => {

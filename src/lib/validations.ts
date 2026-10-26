@@ -22,6 +22,11 @@ const optionalDate = z.string().optional().or(z.literal(""));
 const commissionMoney = z.union([z.literal(""), z.coerce.number().nonnegative("El importe no puede ser negativo.")]).optional();
 const optionalPolicyMoney = commissionMoney;
 const financingMoney = z.union([z.literal(""), z.coerce.number()]).optional();
+export const policyPremiumBreakdownCaptureSchema = z.object({
+  premiumIssuanceExpenseAmount: z.number().finite().nonnegative().nullable().optional(),
+  premiumSurchargeAmount: z.number().finite().nullable().optional(),
+  premiumDiscountAmount: z.number().finite().nonnegative().nullable().optional(),
+});
 const receiptCommissionUnitSchema = z.object({
   insuredAssetId: z.string().min(1),
   totalPremium: commissionMoney,

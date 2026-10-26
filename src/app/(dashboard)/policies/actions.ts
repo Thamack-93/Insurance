@@ -12,7 +12,7 @@ import { assertOrganizationContextInTransaction, requireOrganizationContext, typ
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
 import { syncAutoCaptureReceipts, syncPolicyPremiumBreakdownToReceipts } from "@/lib/policy-capture-receipts";
-import { calculateVatFromGross } from "@/lib/premium-breakdown";
+import { calculateVatFromGross, policyPremiumBreakdownChanged } from "@/lib/premium-breakdown";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { hasPolicyRiskData, policyInsuredObjectForSave, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 import { syncPolicyRiskRelations } from "@/lib/policy-risk-relations";
@@ -445,16 +445,28 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           updatedById: userId,
         },
       });
-      await syncPolicyPremiumBreakdownToReceipts(tx, {
-        organizationId: context.organizationId,
-        policyId: id,
-        userId,
-        breakdown: {
-          issuanceExpenseAmount: normalized.premiumIssuanceExpenseAmount,
-          surchargeAmount: normalized.premiumSurchargeAmount,
-          discountAmount: normalized.premiumDiscountAmount,
-        },
-      });
+      if (policyPremiumBreakdownChanged({
+        vatAmount: previousPolicy.premiumVatAmount === null ? null : Number(previousPolicy.premiumVatAmount),
+        issuanceExpenseAmount: previousPolicy.premiumIssuanceExpenseAmount === null ? null : Number(previousPolicy.premiumIssuanceExpenseAmount),
+        surchargeAmount: previousPolicy.premiumSurchargeAmount === null ? null : Number(previousPolicy.premiumSurchargeAmount),
+        discountAmount: previousPolicy.premiumDiscountAmount === null ? null : Number(previousPolicy.premiumDiscountAmount),
+      }, {
+        vatAmount: normalized.premiumVatAmount,
+        issuanceExpenseAmount: normalized.premiumIssuanceExpenseAmount,
+        surchargeAmount: normalized.premiumSurchargeAmount,
+        discountAmount: normalized.premiumDiscountAmount,
+      })) {
+        await syncPolicyPremiumBreakdownToReceipts(tx, {
+          organizationId: context.organizationId,
+          policyId: id,
+          userId,
+          breakdown: {
+            issuanceExpenseAmount: normalized.premiumIssuanceExpenseAmount,
+            surchargeAmount: normalized.premiumSurchargeAmount,
+            discountAmount: normalized.premiumDiscountAmount,
+          },
+        });
+      }
       const submittedRiskDetails = policyRiskDetailsSchema.safeParse(parsed.data.riskDetails);
       if (submittedRiskDetails.success && (
         hasPolicyRiskData(submittedRiskDetails.data) ||

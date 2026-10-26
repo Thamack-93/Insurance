@@ -6,7 +6,7 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/money";
-import { calculateVatFromGross } from "@/lib/premium-breakdown";
+import { calculateVatFromGross, deriveNetPremium } from "@/lib/premium-breakdown";
 import {
   currencyOptions,
   paymentFrequencyOptions,
@@ -91,6 +91,9 @@ export function PolicyForm({
   const watchedClientId = useWatch({ control, name: "clientId" });
   const watchedStartDate = useWatch({ control, name: "startDate" });
   const watchedPremiumAmount = useWatch({ control, name: "premiumAmount" });
+  const watchedIssuanceExpense = useWatch({ control, name: "premiumIssuanceExpenseAmount" });
+  const watchedSurcharge = useWatch({ control, name: "premiumSurchargeAmount" });
+  const watchedDiscount = useWatch({ control, name: "premiumDiscountAmount" });
   const watchedCurrency = useWatch({ control, name: "currency" });
   const watchedRiskDetails = useWatch({ control, name: "riskDetails" });
   const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
@@ -98,6 +101,18 @@ export function PolicyForm({
   const vehicles = selectedPolicyType === "AUTO" && watchedRiskDetails && typeof watchedRiskDetails === "object"
     ? ((watchedRiskDetails as { data?: { vehicles?: Array<{ vin?: string }> } }).data?.vehicles ?? [])
     : [];
+  const policyVat = calculateVatFromGross(Number(watchedPremiumAmount));
+  const policyNetPremium = policyVat === null
+    || watchedIssuanceExpense === "" || watchedIssuanceExpense === undefined
+    || watchedSurcharge === "" || watchedSurcharge === undefined
+    || watchedDiscount === "" || watchedDiscount === undefined
+    ? null
+    : deriveNetPremium(Number(watchedPremiumAmount), {
+        vatAmount: policyVat,
+        issuanceExpenseAmount: Number(watchedIssuanceExpense),
+        surchargeAmount: Number(watchedSurcharge),
+        discountAmount: Number(watchedDiscount),
+      });
   const serialNumbers = vehicles.map((vehicle) => vehicle.vin?.trim() ?? "").filter(Boolean);
   const renewalCandidateKey = findRenewalCandidates && watchedClientId && watchedStartDate && serialNumbers.length
     ? JSON.stringify([watchedClientId, selectedPolicyType, watchedStartDate, serialNumbers])
@@ -285,7 +300,8 @@ export function PolicyForm({
 
           <FormSection title="Desglose total de prima" description="Captura una sola vez los importes de toda la vigencia. El IVA se calcula al 16% de la base antes de IVA; recargo y descuentos se distribuyen según la prima neta de cada recibo, y los gastos de expedición se asignan al primero. Los centavos residuales se ajustan en el último recibo. Deja en blanco lo que aún no indique la póliza; captura 0 cuando la aseguradora confirme que no aplica.">
             <FormGrid>
-              <div className="rounded-md border bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">IVA total calculado (16% de la base antes de IVA): </span><strong>{formatCurrency(calculateVatFromGross(Number(watchedPremiumAmount)) ?? 0, watchedCurrency)}</strong></div>
+              <div className="rounded-md border bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">IVA total calculado (16% de la base antes de IVA): </span><strong>{formatCurrency(policyVat ?? 0, watchedCurrency)}</strong></div>
+              <div className="rounded-md border bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">Prima neta total calculada: </span><strong>{policyNetPremium === null ? "Completa el desglose para calcularla" : formatCurrency(policyNetPremium, watchedCurrency)}</strong></div>
               <FormField label="Gastos de expedición totales" htmlFor="premiumIssuanceExpenseAmount" error={errors.premiumIssuanceExpenseAmount?.message}>
                 <Input id="premiumIssuanceExpenseAmount" type="number" min="0" step="0.01" placeholder="Pendiente" {...register("premiumIssuanceExpenseAmount")} />
               </FormField>

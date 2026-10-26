@@ -3,6 +3,7 @@ import {
   policySchema,
   policyUpdateSchemaForOriginalTerm,
   policyUpdateTermIsValid,
+  policyPremiumBreakdownCaptureSchema,
   receiptSchema,
   type PolicyFormValues,
 } from "@/lib/validations";
@@ -55,6 +56,10 @@ describe("policy term validation", () => {
 });
 
 describe("financing premium validation", () => {
+  it("accepts a negative surcharge from PDF policy capture", () => {
+    expect(policyPremiumBreakdownCaptureSchema.safeParse({ premiumSurchargeAmount: -193.18 }).success).toBe(true);
+  });
+
   it("accepts a negative policy-level financing adjustment", () => {
     const parsed = policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(
       policy({ premiumSurchargeAmount: -193.18 }),

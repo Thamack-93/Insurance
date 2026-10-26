@@ -10,6 +10,15 @@ export type UnitPremiumBreakdown = PremiumBreakdown & {
   totalPremium: number;
 };
 
+export function policyPremiumBreakdownChanged(previous: PremiumBreakdown, next: PremiumBreakdown) {
+  const keys = ["vatAmount", "issuanceExpenseAmount", "surchargeAmount", "discountAmount"] as const;
+  return keys.some((key) => {
+    const before = previous[key] ?? null;
+    const after = next[key] ?? null;
+    return before === null ? after !== null : after === null || Math.abs(Number(before) - Number(after)) > 0.001;
+  });
+}
+
 export function roundPremiumMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
