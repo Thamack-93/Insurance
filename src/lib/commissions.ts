@@ -124,7 +124,7 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
           cancelledAt: row.cancelledAt,
           cancellationReason: row.cancellationReason,
           postedPaymentCount: row.payments.length,
-        })));
+        })), { includePaidCancelledReceipts: true });
       }
       if (reconciliation.status !== "RECONCILED" && shouldRequirePolicyPremiumReconciliation(receipt.status, receipt.payments.length)) {
         const reason = `La prima no concilia con los recibos vigentes (diferencia ${reconciliation.difference.toFixed(2)} ${receipt.currency}); revisa recibos antes de calcular.`;

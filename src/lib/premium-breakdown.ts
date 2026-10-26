@@ -101,9 +101,11 @@ export type PolicyReceiptReconciliationRow = {
 export function reconcilePolicyReceiptPremium(
   policyPremium: number,
   receiptAmounts: PolicyReceiptReconciliationRow[],
+  options: { includePaidCancelledReceipts?: boolean } = {},
 ) {
   const baseReceipts = receiptAmounts.filter((receipt) => !receipt.endorsementId);
-  const activeBaseReceipts = baseReceipts.filter((receipt) => receipt.status !== "CANCELLED");
+  const activeBaseReceipts = baseReceipts.filter((receipt) => receipt.status !== "CANCELLED"
+    || (options.includePaidCancelledReceipts === true && (receipt.postedPaymentCount ?? 0) > 0));
   const receiptTotal = roundPremiumMoney(activeBaseReceipts.reduce((sum, receipt) => sum + receipt.amount, 0));
   const sequences = baseReceipts.flatMap((receipt) => receipt.receiptSequence == null ? [] : [receipt.receiptSequence]);
   const latestReceiptSequence = sequences.length ? Math.max(...sequences) : null;

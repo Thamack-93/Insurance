@@ -71,6 +71,12 @@ describe("shared receipt premium breakdown", () => {
     expect(reconcilePolicyReceiptPremium(28826.67, [
       { amount: 7772.16, status: "PAID", receiptSequence: 1 },
       { amount: 7018.17, status: "PAID", receiptSequence: 2 },
+      { amount: 7018.17, status: "PAID", receiptSequence: 3 },
+      { ...finalUnpaid, postedPaymentCount: 1 },
+    ], { includePaidCancelledReceipts: true })).toMatchObject({ receiptTotal: 28826.67, cancellationOffset: 0, difference: 0, status: "RECONCILED" });
+    expect(reconcilePolicyReceiptPremium(28826.67, [
+      { amount: 7772.16, status: "PAID", receiptSequence: 1 },
+      { amount: 7018.17, status: "PAID", receiptSequence: 2 },
       { ...finalUnpaid, receiptSequence: 3 },
       { amount: 7018.17, status: "PAID", receiptSequence: 4 },
     ])).toMatchObject({ cancellationOffset: 0, difference: 7018.17, status: "REVIEW" });
