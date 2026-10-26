@@ -53,6 +53,23 @@ export type CommissionPremiumComponents = {
   visibleDiscounts: number;
 };
 
+/**
+ * A policy-specific override applies uniformly to the policy, so a complete
+ * receipt-level premium breakdown is enough when no per-unit allocation exists.
+ * If unit rows were entered, keep using them (and their reconciliation checks).
+ */
+export function shouldUseAggregatePolicyOverride(input: {
+  hasInsuredAssets: boolean;
+  policyRateOverride: number | null;
+  aggregateComponents: CommissionPremiumComponents | null;
+  unitBreakdownCount: number;
+}) {
+  return input.hasInsuredAssets
+    && input.policyRateOverride !== null
+    && input.aggregateComponents !== null
+    && input.unitBreakdownCount === 0;
+}
+
 export type CommissionEstimate = {
   status: "CALCULATED" | "REVIEW";
   reason?: string;
