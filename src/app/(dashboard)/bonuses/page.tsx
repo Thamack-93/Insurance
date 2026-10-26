@@ -4,7 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
-import { formatCurrency, toNumber } from "@/lib/money";
+import { formatCurrency, formatCurrencyExact, toNumber } from "@/lib/money";
 import { withTenantTransaction, requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { BONUS_PROGRAMS, resolveBonusProgram } from "@/lib/bonus-rules";
 import { bonusPeriodLabel } from "@/lib/bonus-periods";
@@ -71,10 +71,33 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
     const candidatePolicyIds = [...new Set(run.items.filter((item) => item.status === "REVIEW" && item.reason === reason).map((item) => item.policyId).filter((id): id is string => Boolean(id)))];
     return candidatePolicyIds.flatMap((policyId) => {
       const reviewItems = run.items.filter((item) => item.policyId === policyId && item.status === "REVIEW");
-      if (!reviewItems.length || reviewItems.some((item) => item.reason !== reason || item.netPremiumPaid === null || item.eligibleAmount === null)) return [];
-      return [{ policyId, policyNumber: reviewItems[0].policy?.policyNumber ?? "Póliza", count: reviewItems.length, netPremium: reviewItems.reduce((sum, item) => sum + toNumber(item.netPremiumPaid), 0) }];
+      if (!reviewItems.length || reviewItems.some((item) => item.reason !== reason || item.paymentId === null || item.netPremiumPaid === null || item.eligibleAmount === null)) return [];
+      const netPremiumByCurrency = new Map<string, number>();
+      for (const item of reviewItems) {
+        const currency = (item.currency ?? "MXN").toUpperCase();
+        netPremiumByCurrency.set(currency, (netPremiumByCurrency.get(currency) ?? 0) + toNumber(item.netPremiumPaid));
+      }
+      return [{
+        policyId,
+        policyNumber: reviewItems[0].policy?.policyNumber ?? "Póliza",
+        count: reviewItems.length,
+        netPremiumByCurrency: [...netPremiumByCurrency].map(([currency, amount]) => ({ currency, amount })),
+        eligibleAmountMxn: reviewItems.reduce((sum, item) => sum + toNumber(item.eligibleAmount), 0),
+      }];
     });
   })();
+  const premiumReviewSummary = premiumReviewGroups.reduce((summary, group) => {
+    summary.paymentCount += group.count;
+    summary.eligibleAmountMxn += group.eligibleAmountMxn;
+    for (const entry of group.netPremiumByCurrency) {
+      summary.netPremiumByCurrency.set(entry.currency, (summary.netPremiumByCurrency.get(entry.currency) ?? 0) + entry.amount);
+    }
+    return summary;
+  }, { paymentCount: 0, eligibleAmountMxn: 0, netPremiumByCurrency: new Map<string, number>() });
+  const premiumReviewCurrencySummary = [...premiumReviewSummary.netPremiumByCurrency]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, amount]) => formatCurrencyExact(amount, currency))
+    .join(" + ");
 
   return (
     <div className="flex flex-col gap-6">
@@ -189,7 +212,9 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
               <input type="hidden" name="version" value={run.version} />
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium">Aceptar todas las pendientes elegibles: {premiumReviewGroups.length} {premiumReviewGroups.length === 1 ? "póliza" : "pólizas"} · {premiumReviewGroups.reduce((sum, group) => sum + group.count, 0)} pagos · {formatCurrency(premiumReviewGroups.reduce((sum, group) => sum + group.netPremium, 0), "MXN")} de PNP</p>
+                  <p className="text-sm font-medium">Aceptar todas las pendientes elegibles: {premiumReviewGroups.length} {premiumReviewGroups.length === 1 ? "póliza" : "pólizas"} · {premiumReviewSummary.paymentCount} pagos</p>
+                  <p className="mt-1 text-xs text-muted-foreground">PNP asignada por moneda: {premiumReviewCurrencySummary || "—"}</p>
+                  <p className="mt-1 text-sm font-medium">Base computable que se añadirá: {formatCurrencyExact(premiumReviewSummary.eligibleAmountMxn, "MXN")} MXN</p>
                   <p className="mt-1 text-xs text-muted-foreground">Sólo acepta partidas con PNP completa derivada por unidad; otras causas de revisión permanecen pendientes.</p>
                   <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Revisé el resumen y acepto como computables todas las partidas elegibles de PNP listadas para esta corrida.</span></label>
                 </div>
@@ -203,7 +228,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
                   <input type="hidden" name="runId" value={run.id} />
                   <input type="hidden" name="policyId" value={group.policyId} />
                   <input type="hidden" name="version" value={run.version} />
-                  <div><p className="text-sm font-medium">Póliza {group.policyNumber} · {group.count} {group.count === 1 ? "pago" : "pagos"} · {formatCurrency(group.netPremium, "MXN")} de PNP</p><label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Acepto la prima neta derivada para esta póliza y esta proyección, con base en los importes registrados.</span></label></div>
+                  <div><p className="text-sm font-medium">Póliza {group.policyNumber} · {group.count} {group.count === 1 ? "pago" : "pagos"}</p><p className="mt-1 text-xs text-muted-foreground">PNP: {group.netPremiumByCurrency.map(({ currency, amount }) => formatCurrencyExact(amount, currency)).join(" + ")} · Base computable: {formatCurrencyExact(group.eligibleAmountMxn, "MXN")} MXN</p><label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Acepto la prima neta derivada para esta póliza y esta proyección, con base en los importes registrados.</span></label></div>
                   <Button type="submit" variant="outline">Hacer computables</Button>
                 </form>)}
               </div>
