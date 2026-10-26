@@ -149,6 +149,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       premiumBreakdownByUnit: breakdown.length ? breakdown : null,
     });
     const netPremiumFromUnitBreakdown = calculatedNet !== null && breakdown.length > 0;
+    const unitBreakdownCoverageMismatch = netPremiumFromUnitBreakdown && breakdown.length !== receiptPayments[0].policy.insuredAssets.length;
     const currencyMismatch = receiptPayments.some((payment) => payment.currency.toUpperCase() !== receipt.currency.toUpperCase());
     const relevantReconciliation = receipt.endorsementId
       ? endorsementReconciliation.get(receipt.endorsementId)
@@ -201,7 +202,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       }
       if (!policy.bonusSellerId && evidence.sellerAttributionConfirmed !== true) reasons.push("Atribución provisional: confirmar vendedor histórico con sellerAttributionConfirmed=true.");
       if (calculatedNet === null) reasons.push("Falta el desglose completo del recibo para calcular prima neta.");
-      if (netPremiumFromUnitBreakdown) reasons.push("PNP derivada del desglose por unidad; validar contra el recibo individual antes de aprobar.");
+      if (unitBreakdownCoverageMismatch) reasons.push(`El desglose cubre ${breakdown.length} unidades y la póliza tiene ${policy.insuredAssets.length}; validar la cobertura del recibo antes de aprobar.`);
       if (overpaid) reasons.push(`Los pagos POSTED acumulados (${totalPostedAllTime.toFixed(2)}) exceden el recibo (${n(receipt.amount).toFixed(2)}); revisar la aplicación antes de incluirlo en el bono.`);
       let conversion: ReturnType<typeof convertMoneyValue> | null = null;
       if (netPaid !== null) {
