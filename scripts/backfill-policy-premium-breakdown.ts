@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "../src/generated/prisma/client.ts";
-import { writeActivityLog } from "../src/lib/activity-log.ts";
+import { safeJson } from "../src/lib/activity-log.ts";
 import { assertOrganizationContextInTransaction, type OrganizationContext } from "../src/lib/organization-context.ts";
 import { deriveNetPremium, roundPremiumMoney } from "../src/lib/premium-breakdown.ts";
 import { evaluatePolicyPremiumBackfill, type PolicyPremiumBackfillPolicy } from "../src/lib/policy-premium-backfill.ts";
@@ -225,8 +225,11 @@ async function assertProductionTarget(prisma: PrismaClient) {
   const expectedHost = process.env.POLICY_PREMIUM_BACKFILL_PRODUCTION_HOST?.toLowerCase();
   const expectedDatabase = process.env.POLICY_PREMIUM_BACKFILL_PRODUCTION_DATABASE;
   const expectedRole = process.env.POLICY_PREMIUM_BACKFILL_PRODUCTION_ROLE;
+  const usePolicyAppUser = process.argv.includes("--use-policy-app-user");
+  const roleIsAllowed = expectedRole === "policydesk_backfill"
+    || (expectedRole === "policydesk_app" && usePolicyAppUser);
   if (process.env.NODE_ENV !== "production" || process.env.VERCEL === "1" || process.env.VERCEL_ENV) throw new Error("POLICY_PREMIUM_BACKFILL_APPLY_REQUIRES_OPERATOR_RUNTIME");
-  if (url.hostname !== expectedHost || decodeURIComponent(url.pathname.replace(/^\//, "").split("?")[0]) !== expectedDatabase || decodeURIComponent(url.username) !== expectedRole || expectedRole !== "policydesk_backfill") throw new Error("POLICY_PREMIUM_BACKFILL_TARGET_MISMATCH");
+  if (url.hostname !== expectedHost || decodeURIComponent(url.pathname.replace(/^\//, "").split("?")[0]) !== expectedDatabase || decodeURIComponent(url.username) !== expectedRole || !roleIsAllowed) throw new Error("POLICY_PREMIUM_BACKFILL_TARGET_MISMATCH");
   if (url.searchParams.get("sslmode")?.toLowerCase() !== "verify-full" || !url.hostname.endsWith(".neon.tech")) throw new Error("POLICY_PREMIUM_BACKFILL_TLS_OR_HOST_INVALID");
   const identity = await prisma.$queryRaw<Array<{ role: string; database: string; readOnly: string; superuser: boolean; bypassRls: boolean; login: boolean; inherit: boolean }>>(Prisma.sql`
     SELECT current_user AS role, current_database() AS database,
@@ -281,21 +284,22 @@ async function applyPlan(prisma: PrismaClient, organizationId: string, asOfDate:
         },
         select: { id: true, premiumAmount: true, premiumVatAmount: true, premiumIssuanceExpenseAmount: true, premiumSurchargeAmount: true, premiumDiscountAmount: true },
       });
-      await writeActivityLog({
-        organizationId,
-        entityType: "Policy",
-        entityId: item.policyId,
-        action: item.outcome.status === "CANDIDATE" ? "POLICY_PREMIUM_BREAKDOWN_BACKFILL" : "POLICY_PREMIUM_BREAKDOWN_SOURCE_REVIEW",
-        oldValue: {
-          premiumAmount: current.premiumAmount,
-          premiumVatAmount: current.premiumVatAmount,
-          premiumIssuanceExpenseAmount: current.premiumIssuanceExpenseAmount,
-          premiumSurchargeAmount: current.premiumSurchargeAmount,
-          premiumDiscountAmount: current.premiumDiscountAmount,
+      await tx.activityLog.create({
+        data: {
+          organizationId,
+          entityType: "Policy",
+          entityId: item.policyId,
+          action: item.outcome.status === "CANDIDATE" ? "POLICY_PREMIUM_BREAKDOWN_BACKFILL" : "POLICY_PREMIUM_BREAKDOWN_SOURCE_REVIEW",
+          oldValue: safeJson({
+            premiumAmount: current.premiumAmount,
+            premiumVatAmount: current.premiumVatAmount,
+            premiumIssuanceExpenseAmount: current.premiumIssuanceExpenseAmount,
+            premiumSurchargeAmount: current.premiumSurchargeAmount,
+            premiumDiscountAmount: current.premiumDiscountAmount,
+          }),
+          newValue: safeJson({ ...updated, sourceReference: item.fields.sourceReference }),
+          userId: context.userId,
         },
-        newValue: { ...updated, sourceReference: item.fields.sourceReference },
-        userId: context.userId,
-        db: tx,
       });
     }
     const after = await loadEligiblePolicies(tx, organizationId, asOfDate);
