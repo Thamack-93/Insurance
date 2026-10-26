@@ -19,6 +19,21 @@ describe("policy risk details", () => {
     }
   });
 
+  it("drops legacy auto modality values instead of retaining a policy-level classification", () => {
+    const parsed = policyRiskDetailsSchema.parse({
+      version: 1,
+      policyType: "AUTO",
+      commissionPolicyMode: "FLOTILLA",
+      data: {
+        policyMode: "FLOTILLA",
+        vehicles: [{ make: "Toyota", model: "Corolla", year: "2024", version: "", vin: "VIN-1", plates: "", unitClass: "" }],
+      },
+    });
+
+    expect(parsed).not.toHaveProperty("commissionPolicyMode");
+    expect(parsed.policyType === "AUTO" && parsed.data).not.toHaveProperty("policyMode");
+  });
+
   it("summarizes multiple vehicles without losing the underlying details", () => {
     const details = {
       version: 1,
