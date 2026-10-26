@@ -321,7 +321,7 @@ export default async function CommissionsPage({
           </div>
         </section>
 
-        <SectionCard title="Reporte de comisiones por periodo" description="El periodo se determina por la fecha en que el cliente pagó la prima. Solo se incluyen pagos confirmados.">
+        <SectionCard title="Reporte de comisiones por periodo" description="El reporte se vuelve a construir desde pagos y comisiones; PolicyDesk no guarda una copia histórica de la consulta.">
           {scope.membershipRole === "AGENT" ? <p className="border-b px-4 py-3 text-sm text-muted-foreground">Puedes consultar los pagos y comisiones de tu cartera. Solo Owner o Admin puede calcular las comisiones faltantes.</p> : (
             <form action={generateCommissionReport} className="flex flex-wrap items-end gap-3 border-b px-4 py-4">
               <label className="grid gap-1 text-sm">Desde<input required type="date" name="paidFrom" defaultValue={params.paidFrom} className="h-10 rounded-md border bg-background px-3" /></label>
@@ -333,6 +333,7 @@ export default async function CommissionsPage({
             <summary className="w-fit cursor-pointer font-medium text-foreground">Cómo se calcula</summary>
             <p className="mt-2 max-w-4xl">Se parte del importe del recibo, se restan IVA, expedición y recargo, y se suman los descuentos capturados. Después se asigna al pago la parte proporcional de prima neta y comisión. Si falta un dato, una regla o una conciliación supera $1.00, el pago queda pendiente de revisión.</p>
           </details>
+          <p className="border-b bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground">Al pulsar «Calcular y generar reporte», se guardan los cálculos de comisión faltantes como registros financieros persistentes. La consulta del periodo no se guarda como instantánea; descargarla tampoco modifica esos registros. Conserva el archivo en tu equipo si necesitas archivarlo.</p>
           {params.generated === "1" ? <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-sm"><p className="text-emerald-700 dark:text-emerald-300">Reporte generado. Los pagos pendientes aún no tienen una comisión calculada.</p><Button asChild size="sm" variant="outline"><Link href="/data-quality?tab=revisiones">Ver pendientes de revisión<ArrowRight className="ml-2 size-4" /></Link></Button></div> : null}
           {params.paidFrom || params.paidTo ? validPaidRange ? (
             <>

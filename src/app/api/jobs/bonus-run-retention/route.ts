@@ -21,8 +21,13 @@ export async function GET(request: Request) {
   return withPlatformCronAdmission(async () => {
     try {
       const result = await purgeExpiredBonusRuns();
-      return NextResponse.json({ ok: result.failedOrganizations === 0, ...result }, { status: result.failedOrganizations ? 207 : 200 });
-    } catch {
+      const ok = result.failedOrganizations === 0 && !result.moreExpired;
+      const event = { job: "bonus-run-retention", ok, ...result };
+      if (!ok) console.error(JSON.stringify({ level: "error", ...event }));
+      else console.info(JSON.stringify({ level: "info", ...event }));
+      return NextResponse.json(event, { status: ok ? 200 : 503 });
+    } catch (error) {
+      console.error(JSON.stringify({ level: "error", job: "bonus-run-retention", ok: false, error: error instanceof Error ? error.message.slice(0, 300) : "unknown_error" }));
       return NextResponse.json({ ok: false, error: "Bonus run retention failed." }, { status: 500 });
     }
   }, "bonus-run-retention");

@@ -120,6 +120,7 @@ export async function approveBonusRun(formData: FormData) {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const runId = String(formData.get("runId") ?? "");
   const expectedVersion = Number(formData.get("version") ?? 0);
+  if (formData.get("reviewAttestation") !== "on") throw new Error("Confirma que revisaste el detalle del cierre antes de aprobarlo.");
   if (!runId || !Number.isInteger(expectedVersion) || expectedVersion < 1) throw new Error("Falta el cierre o su versión esperada.");
   await withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);

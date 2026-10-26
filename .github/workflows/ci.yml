@@ -15,6 +15,39 @@ permissions:
   contents: read
 
 jobs:
+  production-dependency-audit:
+    # Keep dependency security as its own check instead of reporting it as an
+    # application correctness failure in the quality job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit production dependencies
+        id: audit
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/security
+          npm audit --omit=dev --audit-level=high --json > artifacts/security/npm-audit.json
+      - name: Report audit failure
+        if: failure()
+        run: echo "Production dependency audit found high-severity advisories or could not reach the registry. See the artifact and logs." >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload dependency audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-${{ github.sha }}
+          path: artifacts/security/npm-audit.json
+          if-no-files-found: warn
+          retention-days: 14
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -67,23 +100,6 @@ jobs:
 
       - name: Secret scan
         run: npm run check:secrets
-
-      - name: Production dependency audit
-        id: production-dependency-audit
-        run: |
-          set -o pipefail
-          mkdir -p artifacts/security
-          npm audit --omit=dev --audit-level=high --json \
-            > artifacts/security/npm-audit.json
-
-      - name: Upload dependency audit report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-audit-${{ github.sha }}
-          path: artifacts/security/npm-audit.json
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Check activity-log tenant scope
         run: npm run check:activity-log-scope
