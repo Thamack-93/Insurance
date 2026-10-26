@@ -207,6 +207,17 @@ function createPrisma(connectionString: string) {
   return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 }
 
+async function withOrganizationReadContext<T>(
+  prisma: PrismaClient,
+  organizationId: string,
+  read: (tx: Prisma.TransactionClient) => Promise<T>,
+) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
+    return read(tx);
+  });
+}
+
 async function assertProductionTarget(prisma: PrismaClient) {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("POLICY_PREMIUM_BACKFILL_DATABASE_URL_REQUIRED");
@@ -230,10 +241,10 @@ async function assertProductionTarget(prisma: PrismaClient) {
 async function applyPlan(prisma: PrismaClient, organizationId: string, asOfDate: Date, plan: ReturnType<typeof buildPlan>, expectedInputHash: string) {
   const email = process.env.POLICY_PREMIUM_BACKFILL_REVIEWER_EMAIL?.trim();
   if (!email) throw new Error("POLICY_PREMIUM_BACKFILL_REVIEWER_EMAIL_REQUIRED");
-  const actor = await prisma.organizationMembership.findFirst({
+  const actor = await withOrganizationReadContext(prisma, organizationId, (tx) => tx.organizationMembership.findFirst({
     where: { organizationId, active: true, role: { in: ["OWNER", "ADMIN"] }, user: { active: true, email: { equals: email, mode: "insensitive" } }, organization: { status: "ACTIVE" } },
     select: { id: true, role: true, user: { select: { id: true, email: true, name: true, role: true, platformRole: true } }, organization: { select: { id: true, name: true, slug: true, status: true } } },
-  });
+  }));
   if (!actor) throw new Error("POLICY_PREMIUM_BACKFILL_REVIEWER_NOT_ACTIVE_ORGANIZATION_ADMIN");
   const context: OrganizationContext = {
     userId: actor.user.id,
@@ -314,7 +325,7 @@ async function main() {
   try {
     if (process.argv.includes("--apply")) await assertProductionTarget(prisma);
     const [policies, sourceReview] = await Promise.all([
-      loadEligiblePolicies(prisma, organizationId, asOfDate),
+      withOrganizationReadContext(prisma, organizationId, (tx) => loadEligiblePolicies(tx, organizationId, asOfDate)),
       loadSourceReview(arg("source-review") ? path.resolve(arg("source-review")!) : null),
     ]);
     const plan = buildPlan(policies, sourceReview);
