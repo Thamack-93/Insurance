@@ -16,7 +16,7 @@ import {
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
 import { deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
-import { autoPolicyModeForCount, countInsuredVehicles } from "@/lib/auto-policy-mode";
+import { autoPolicyModeForCount, autoVehicleCount } from "@/lib/auto-policy-mode";
 import { calculateCommissionEstimate, parseCommissionRules, roundMoney, shouldUseAggregatePolicyOverride, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
 
 type CommissionScope = {
@@ -135,9 +135,9 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const riskDetails = receipt.policy.riskDetails && typeof receipt.policy.riskDetails === "object" ? receipt.policy.riskDetails as Record<string, unknown> : {};
       const riskData = riskDetails.data && typeof riskDetails.data === "object" ? riskDetails.data as Record<string, unknown> : {};
       const assets = receipt.policy.insuredAssets;
-      const autoVehicleCount = assets.length || countInsuredVehicles(riskData.vehicles);
+      const vehicleCount = autoVehicleCount(riskData.vehicles, assets.length);
       const policyModeValue = receipt.policy.policyType === "AUTO"
-        ? autoPolicyModeForCount(autoVehicleCount)
+        ? autoPolicyModeForCount(vehicleCount)
         : typeof riskDetails.commissionPolicyMode === "string" && riskDetails.commissionPolicyMode.trim()
           ? riskDetails.commissionPolicyMode
           : "";

@@ -4,7 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { TenantDb } from "@/lib/organization-context";
 import { allocatePaidNetPremium, deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 import { convertMoneyValue, loadCurrencyRates } from "@/lib/currency-rates";
-import { autoPolicyModeForCount, countInsuredVehicles } from "@/lib/auto-policy-mode";
+import { autoPolicyModeForCount, autoVehicleCount } from "@/lib/auto-policy-mode";
 import { bonusPaymentWindow, damagePortfolioLossRatioStatus, normalizedInsurerName, selectBonusTier, type BonusProgram as ProgramRule } from "@/lib/bonus-rules";
 
 export type BonusProjectionInput = { programKey: string; sellerId: string; year: number; periodNumber: number; damagePortfolioLossRatio?: number | null };
@@ -152,7 +152,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       const policy = payment.policy;
       const policyRiskDetails = policy.riskDetails && typeof policy.riskDetails === "object" && !Array.isArray(policy.riskDetails) ? policy.riskDetails as Record<string, unknown> : {};
       const policyRiskData = policyRiskDetails.data && typeof policyRiskDetails.data === "object" && !Array.isArray(policyRiskDetails.data) ? policyRiskDetails.data as Record<string, unknown> : {};
-      const autoVehicleCount = policy.insuredAssets.length || countInsuredVehicles(policyRiskData.vehicles);
+      const vehicleCount = autoVehicleCount(policyRiskData.vehicles, policy.insuredAssets.length);
       const paid = n(payment.amount);
       const netPaid = totalNetPaid === null ? null : paymentIndex === receiptPayments.length - 1
         ? Math.round((totalNetPaid - allocatedSoFar) * 100) / 100
@@ -211,7 +211,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
           sellerId: policy.bonusSellerId ?? policy.client.portfolioOwnerId,
           netPremiumSource: netPremiumFromUnitBreakdown ? "UNIT_BREAKDOWN_REVIEW" : calculatedNet === null ? null : "RECEIPT_COMPONENTS",
           policyStatus: policy.status,
-          ...(policy.policyType === "AUTO" ? { autoPolicyMode: autoPolicyModeForCount(autoVehicleCount), insuredVehicleCount: autoVehicleCount } : {}),
+          ...(policy.policyType === "AUTO" ? { autoPolicyMode: autoPolicyModeForCount(vehicleCount), insuredVehicleCount: vehicleCount } : {}),
           premiumReconciliation: reconciliationEvidence,
           ruleEvidence: evidenceCheck.data,
         },
