@@ -8,7 +8,7 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { withTenantTransaction, requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { BONUS_PROGRAMS, resolveBonusProgram } from "@/lib/bonus-rules";
 import { bonusPeriodLabel } from "@/lib/bonus-periods";
-import { approveBonusRun } from "./actions";
+import { acceptBonusRunPolicyPremium, approveBonusRun } from "./actions";
 import { ExportButtons } from "@/components/reports/export-buttons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
@@ -29,7 +29,7 @@ function bonusRateLabel(eligibilityOnly: boolean | undefined, rate: unknown, sta
   return status === "READY" ? "Sin banda" : "Pendiente";
 }
 
-export default async function BonusesPage({ searchParams }: { searchParams?: Promise<{ run?: string; autosConfirmed?: string; autosExcluded?: string; autosPendingInventory?: string }> }) {
+export default async function BonusesPage({ searchParams }: { searchParams?: Promise<{ run?: string; autosConfirmed?: string; autosExcluded?: string; autosPendingInventory?: string; premiumAccepted?: string }> }) {
   await connection();
   const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const searchParamsResult = (await searchParams) ?? {};
@@ -65,6 +65,16 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
   const runExpiration = (updatedAt: Date) => new Date(updatedAt.getTime() + 5 * 24 * 60 * 60 * 1000);
   const databaseNow = databaseClockRows[0].now;
   const remainingDays = (expiresAt: Date) => Math.max(0, Math.ceil((expiresAt.getTime() - databaseNow.getTime()) / (24 * 60 * 60 * 1000)));
+  const premiumReviewGroups = (() => {
+    if (!run || run.status === "APPROVED") return [];
+    const reason = "PNP derivada del desglose por unidad; validar contra el recibo individual antes de aprobar.";
+    const candidatePolicyIds = [...new Set(run.items.filter((item) => item.status === "REVIEW" && item.reason === reason).map((item) => item.policyId).filter((id): id is string => Boolean(id)))];
+    return candidatePolicyIds.flatMap((policyId) => {
+      const reviewItems = run.items.filter((item) => item.policyId === policyId && item.status === "REVIEW");
+      if (!reviewItems.length || reviewItems.some((item) => item.reason !== reason || item.netPremiumPaid === null || item.eligibleAmount === null)) return [];
+      return [{ policyId, policyNumber: reviewItems[0].policy?.policyNumber ?? "Póliza", count: reviewItems.length, netPremium: reviewItems.reduce((sum, item) => sum + toNumber(item.netPremiumPaid), 0) }];
+    });
+  })();
 
   return (
     <div className="flex flex-col gap-6">
@@ -96,6 +106,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
         </SectionCard>
 
         {searchParamsResult.autosConfirmed !== undefined ? <p role="status" className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">Evidencia de Autos guardada para {Number(searchParamsResult.autosConfirmed) || 0} pólizas; {Number(searchParamsResult.autosExcluded) || 0} con 50 vehículos o más quedaron excluidas y {Number(searchParamsResult.autosPendingInventory) || 0} sin conteo respaldado siguen pendientes de revisión.</p> : null}
+        {searchParamsResult.premiumAccepted !== undefined ? <p role="status" className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">PNP aceptada para {Number(searchParamsResult.premiumAccepted) || 0} partidas de esta proyección. El cierre sigue pendiente si quedan otras revisiones.</p> : null}
         <AutoBonusEvidenceBatchForm sellers={sellers} />
 
       <SectionCard title="Proyecciones y cierres recientes" description="Todas las corridas, incluidos los cierres aprobados, se eliminan automáticamente cinco días después de su última actualización.">
@@ -170,6 +181,19 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             reason: item.reason ?? "Criterios documentados",
             evidenceJson: item.evidenceJson,
           }))} />
+          {premiumReviewGroups.length ? <div className="mt-5 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+            <h3 className="font-medium">Aceptar prima neta de un desglose por unidad</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Esto hace computables sólo las partidas de la póliza seleccionada dentro de esta versión. Registra tu aceptación en la evidencia del cierre y no aprueba el cierre.</p>
+            <div className="mt-3 divide-y rounded-md border bg-background">
+              {premiumReviewGroups.map((group) => <form key={group.policyId} action={acceptBonusRunPolicyPremium} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <input type="hidden" name="runId" value={run.id} />
+                <input type="hidden" name="policyId" value={group.policyId} />
+                <input type="hidden" name="version" value={run.version} />
+                <div><p className="text-sm font-medium">Póliza {group.policyNumber} · {group.count} {group.count === 1 ? "pago" : "pagos"} · {formatCurrency(group.netPremium, "MXN")} de PNP</p><label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Acepto la prima neta derivada para esta póliza y esta proyección, con base en los importes registrados.</span></label></div>
+                <Button type="submit" variant="outline">Hacer computables</Button>
+              </form>)}
+            </div>
+          </div> : null}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
           <p>{run.status === "APPROVED" ? `Aprobado por ${run.approvedBy?.name ?? "administración"} el ${run.approvedAt?.toLocaleDateString("es-MX")}.` : `Versión de cálculo ${run.version}.`} Reglas v{run.ruleSet.version} · {run.ruleSet.sourceFileName} · SHA-256 {run.ruleSet.sourceHash.slice(0, 12)}…</p>
             {run.status !== "APPROVED" ? <form action={approveBonusRun} className="flex flex-col items-start gap-2 sm:items-end"><input type="hidden" name="runId" value={run.id} /><input type="hidden" name="version" value={run.version} /><label className="flex max-w-md items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")} /><span>Confirmo que revisé las partidas, exclusiones, evidencias, periodo y monto de este cierre.</span></label><Button type="submit" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")}>Aprobar cierre</Button></form> : null}
