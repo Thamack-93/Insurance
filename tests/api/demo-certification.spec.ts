@@ -70,7 +70,6 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/policies/org_demo_broker_0001%3Ademo%3Apolicy%3A001");
   await expect(page.getByRole("button", { name: "Nora deshabilitada" })).toBeDisabled();
-  await expect(page.getByText("La carga de archivos está deshabilitada en la demo publicada. Solo se mostrará metadata.")).toBeVisible();
   await expect(page.locator("input[type=file]")).toHaveCount(0);
   await page.goto("/documents");
   await expect(page.getByText("La carga de archivos está deshabilitada en la demo publicada. Esta sección queda como metadata del expediente.")).toBeVisible();

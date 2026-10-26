@@ -135,9 +135,8 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const riskDetails = receipt.policy.riskDetails && typeof receipt.policy.riskDetails === "object" ? receipt.policy.riskDetails as Record<string, unknown> : {};
       const riskData = riskDetails.data && typeof riskDetails.data === "object" ? riskDetails.data as Record<string, unknown> : {};
       const assets = receipt.policy.insuredAssets;
-      const vehicleCount = autoVehicleCount(riskData.vehicles, assets.length);
       const policyModeValue = receipt.policy.policyType === "AUTO"
-        ? autoPolicyModeForCount(vehicleCount)
+        ? "*"
         : typeof riskDetails.commissionPolicyMode === "string" && riskDetails.commissionPolicyMode.trim()
           ? riskDetails.commissionPolicyMode
           : "";

@@ -23,8 +23,8 @@ describe("commissions.logic", () => {
     expect(result.status).toBe("EXPECTED");
   });
 
-  const dimensions = { policyType: "AUTO", productPlan: "AMPLIA", policyMode: "INDIVIDUAL", unitClass: "PARTICULAR", paymentFrequency: "ANNUAL" };
-  const baseRule = { id: "q-auto", policyType: "AUTO", productPlan: "AMPLIA", policyMode: "INDIVIDUAL", unitClass: "PARTICULAR", paymentFrequency: "ANNUAL", rate: 8, validFrom: "2026-01-01", validTo: null, active: true, evidence: "Movimiento conciliado" };
+  const dimensions = { policyType: "AUTO", productPlan: "AMPLIA", policyMode: "*", unitClass: "PARTICULAR", paymentFrequency: "ANNUAL" };
+  const baseRule = { id: "q-auto", policyType: "AUTO", productPlan: "AMPLIA", policyMode: "*", unitClass: "PARTICULAR", paymentFrequency: "ANNUAL", rate: 8, validFrom: "2026-01-01", validTo: null, active: true, evidence: "Movimiento conciliado" };
 
   it("calculates net premium as total less tax, issuance and surcharge plus visible discounts", () => {
     const result = calculateCommissionEstimate({ totalPremium: 1190, iva: 190, issuanceExpense: 100, installmentSurcharge: 50, visibleDiscounts: 20 }, [baseRule], dimensions, new Date("2026-06-01T12:00:00Z"));
@@ -44,6 +44,16 @@ describe("commissions.logic", () => {
     expect(calculateCommissionEstimate(components, [], dimensions, new Date("2026-06-01T12:00:00Z")).status).toBe("REVIEW");
     expect(calculateCommissionEstimate(components, [specific, { ...specific, id: "duplicate", rate: 9 }], dimensions, new Date("2026-06-01T12:00:00Z")).reason).toMatch(/misma prioridad/);
     expect(calculateCommissionEstimate(components, [{ ...specific, evidence: "" }], dimensions, new Date("2026-06-01T12:00:00Z")).reason).toMatch(/evidencia documentada/);
+  });
+
+  it("selects AUTO commission by vehicle class and ignores policy unit-count modality", () => {
+    const classRule = { ...baseRule, id: "private-car", rate: 8 };
+    const fleetSpecific = { ...classRule, id: "fleet-private-car", policyMode: "FLOTILLA", rate: 10 };
+    const individualSpecific = { ...classRule, id: "individual-private-car", policyMode: "INDIVIDUAL", rate: 12 };
+    const components = { totalPremium: 1000, iva: 0, issuanceExpense: 0, installmentSurcharge: 0, visibleDiscounts: 0 };
+
+    expect(calculateCommissionEstimate(components, [classRule, fleetSpecific, individualSpecific], dimensions, new Date("2026-06-01T12:00:00Z")).rule?.id).toBe("private-car");
+    expect(calculateCommissionEstimate(components, [fleetSpecific], dimensions, new Date("2026-06-01T12:00:00Z")).status).toBe("REVIEW");
   });
 
   it("supports fleet units with different class rates and rejects incomplete premium data", () => {

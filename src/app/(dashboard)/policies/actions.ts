@@ -17,8 +17,9 @@ import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-
 import { hasPolicyRiskData, policyInsuredObjectForSave, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 import { syncPolicyRiskRelations } from "@/lib/policy-risk-relations";
 import { findSerialRenewalCandidatesForTarget, syncSerialRenewalSuggestionsForTarget } from "@/lib/policy-renewal-match";
+import { recordBonusEvidenceReview } from "@/lib/bonus-evidence";
 
-function normalizePolicyInput(values: PolicyFormValues) {
+function normalizePolicyInput(values: PolicyFormValues, reviewerId: string) {
   const parsedRiskDetails = policyRiskDetailsSchema.safeParse(values.riskDetails);
   return {
     policyNumber: values.policyNumber.trim(),
@@ -42,7 +43,7 @@ function normalizePolicyInput(values: PolicyFormValues) {
     insuredObject: normalizeOptionalText(policyInsuredObjectForSave(parsedRiskDetails.success ? parsedRiskDetails.data : null, values.insuredObject)),
     riskDetails: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? parsedRiskDetails.data as Prisma.InputJsonValue : Prisma.DbNull,
     riskDetailsReviewRequired: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? false : undefined,
-    bonusEligibilityJson: normalizeOptionalText(values.bonusEligibilityJson),
+    bonusEligibilityJson: recordBonusEvidenceReview(normalizeOptionalText(values.bonusEligibilityJson), reviewerId),
     beneficiaryInfo: normalizeOptionalText(values.beneficiaryInfo),
     notes: normalizeOptionalText(values.notes),
     renewedFromPolicyId: optionalRelationId(values.renewedFromPolicyId),
@@ -159,7 +160,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       : parsed.data.bonusSellerId?.trim();
     if (!requestedBonusSellerId) return errorResult("Selecciona al vendedor que debe recibir la atribución de bono.");
     await assertClientOrganizationAccess(parsed.data.clientId, context);
-    const normalized = normalizePolicyInput(parsed.data);
+    const normalized = normalizePolicyInput(parsed.data, userId);
     if (context.membershipRole === "AGENT") normalized.commissionRateOverride = null;
     const renewalSourceId = normalized.renewedFromPolicyId;
     const renewalSource = renewalSourceId
@@ -369,7 +370,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       return errorResult("La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.");
     }
 
-    const normalized = normalizePolicyInput(parsed.data);
+    const normalized = normalizePolicyInput(parsed.data, userId);
     const nextRenewedFromPolicyId = normalized.renewedFromPolicyId;
     const previousRenewedFromPolicyId = previousPolicy.renewedFromPolicyId ?? null;
     const renewalChanged = previousRenewedFromPolicyId !== nextRenewedFromPolicyId;
