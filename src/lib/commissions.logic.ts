@@ -53,6 +53,11 @@ export type CommissionPremiumComponents = {
   visibleDiscounts: number;
 };
 
+/** Paid money remains commissionable even if the receipt was later cancelled. */
+export function canCalculateCommissionForReceipt(receiptStatus: string, postedPaymentCount: number) {
+  return receiptStatus !== "CANCELLED" || postedPaymentCount > 0;
+}
+
 /**
  * A policy-specific override applies uniformly to the policy, so a complete
  * receipt-level premium breakdown is enough when no per-unit allocation exists.

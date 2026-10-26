@@ -24,7 +24,7 @@ import { ExportButtons } from "@/components/reports/export-buttons";
 import { generateCommissionReport } from "./actions";
 import { formatDateInput, parseDateInput } from "@/lib/form-utils";
 import { businessAddDays } from "@/lib/business-dates";
-import { allocatePaidNetPremium, deriveReceiptNetPremium, type UnitPremiumBreakdown } from "@/lib/premium-breakdown";
+import { allocatePaidNetPremium, deriveReceiptNetPremium, exceedsReceiptPaymentTolerance, type UnitPremiumBreakdown } from "@/lib/premium-breakdown";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
 import { summarizeCommissionReportRows } from "@/lib/commission-report";
@@ -186,7 +186,7 @@ export default async function CommissionsPage({
     if (!receipt) continue;
     const receiptAmount = toNumber(receipt.amount);
     const totalPaid = receiptPayments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
-    const overpaid = totalPaid > receiptAmount + 0.01;
+    const overpaid = exceedsReceiptPaymentTolerance(totalPaid, receiptAmount);
     const netPremium = deriveReceiptNetPremium({
       amount: receiptAmount,
       vatAmount: receipt.vatAmount === null ? null : toNumber(receipt.vatAmount),
@@ -232,7 +232,8 @@ export default async function CommissionsPage({
     const commission = receipt.commissions.length === 1 ? receipt.commissions[0] : null;
     const allReceiptPayments = allPostedPaymentsByReceipt.get(payment.receiptId) ?? [];
     const reasons: string[] = [];
-    if (receipt.status === "CANCELLED") reasons.push("El recibo está cancelado; requiere revisión.");
+    const hasPostedPayment = allReceiptPayments.length > 0;
+    if (receipt.status === "CANCELLED" && !hasPostedPayment) reasons.push("El recibo está cancelado y no tiene pagos POSTED.");
     if (receipt.commissions.length > 1) reasons.push("Hay más de una comisión asociada al recibo.");
     if (!commission) reasons.push(receipt.commissionReviewReason ?? "No hay una comisión calculada con regla exacta.");
     if (commission && receipt.commissionCalculationStatus === "REVIEW" && receipt.commissionReviewReason) reasons.push(receipt.commissionReviewReason);
@@ -242,7 +243,7 @@ export default async function CommissionsPage({
     if (netPremium === null) reasons.push("Falta el desglose necesario para obtener la prima neta.");
     if (commission && netPremium !== null && !commissionSnapshotMatches(commission, netPremium)) reasons.push("La evidencia de comisión no coincide con el desglose actual del recibo.");
     const allPostedTotal = allReceiptPayments.reduce((sum, postedPayment) => sum + toNumber(postedPayment.amount), 0);
-    if (allPostedTotal > receiptAmount + 0.01) reasons.push("Los pagos POSTED exceden el importe del recibo.");
+    if (exceedsReceiptPaymentTolerance(allPostedTotal, receiptAmount)) reasons.push("Los pagos POSTED exceden el importe del recibo por más de $1.00.");
     const calculated = Boolean(commission && commission.status !== "CANCELLED" && receiptAmount > 0 && !reasons.length);
     const allocation = allocationsByPayment.get(payment.id);
     const allocatedNetPremium = netPremium === null || reasons.some((reason) => reason.includes("moneda") || reason.includes("exceden")) ? null : allocation?.netPremium ?? null;
