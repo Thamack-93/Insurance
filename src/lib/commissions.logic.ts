@@ -89,10 +89,13 @@ export function resolveCommissionRule(
 ): { rule: CommissionRule | null; ambiguous: boolean } {
   const date = asOf.toISOString().slice(0, 10);
   const keys = ["policyType", "productPlan", "policyMode", "unitClass", "paymentFrequency"] as const;
+  const isAuto = dimensions.policyType.toUpperCase() === "AUTO";
+  const relevantKeys = isAuto ? keys.filter((key) => key !== "policyMode") : keys;
   const matches = rules.filter((rule) => rule.active && rule.validFrom <= date && (!rule.validTo || rule.validTo >= date)
+    && (!isAuto || rule.policyMode === WILDCARD)
     && keys.every((key) => rule[key] === WILDCARD || rule[key] === dimensions[key]));
   if (!matches.length) return { rule: null, ambiguous: false };
-  const specificity = (rule: CommissionRule) => keys.reduce((score, key) => score + Number(rule[key] !== WILDCARD), 0);
+  const specificity = (rule: CommissionRule) => relevantKeys.reduce((score, key) => score + Number(rule[key] !== WILDCARD), 0);
   const best = Math.max(...matches.map(specificity));
   const selected = matches.filter((rule) => specificity(rule) === best);
   return selected.length === 1 ? { rule: selected[0]!, ambiguous: false } : { rule: null, ambiguous: true };

@@ -41,11 +41,12 @@ export function CommissionRulesManager({ insurers: initialInsurers }: { insurers
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     startTransition(async () => {
-      const result = await saveCommissionRuleAction(form);
+      const submittedForm = form.policyType === "AUTO" ? { ...form, policyMode: "*" } : form;
+      const result = await saveCommissionRuleAction(submittedForm);
       if (!result.ok) { toast.error(result.error); return; }
       toast.success(result.message);
       setInsurers((current) => current.map((insurer) => insurer.id === insurerId
-        ? { ...insurer, commissionRules: [...rules.filter((rule) => rule.id !== (form.id || "")), { ...form, id: form.id || result.id, validTo: form.validTo || null }], commissionRulesVersion: insurer.commissionRulesVersion + 1 }
+        ? { ...insurer, commissionRules: [...rules.filter((rule) => rule.id !== (submittedForm.id || "")), { ...submittedForm, id: submittedForm.id || result.id, validTo: submittedForm.validTo || null }], commissionRulesVersion: insurer.commissionRulesVersion + 1 }
         : insurer));
       const updated = insurers.find((insurer) => insurer.id === insurerId);
       setForm(emptyRule(insurerId, (updated?.commissionRulesVersion ?? 0) + 1));
@@ -66,7 +67,7 @@ export function CommissionRulesManager({ insurers: initialInsurers }: { insurers
           {!rules.length ? <p className="text-sm text-muted-foreground">No hay reglas configuradas. Los estados mensuales sirven como evidencia para proponerlas, pero no se activan porcentajes sin identificar sus dimensiones.</p> : null}
           {rules.map((rule) => (
             <div key={rule.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
-              <span>{rule.policyType} · {rule.productPlan} · {rule.policyMode} · {rule.unitClass} · {rule.paymentFrequency} · {rule.rate}% · {rule.active ? "Activa" : "Inactiva"}</span>
+              <span>{rule.policyType} · {rule.productPlan} · {rule.policyType === "AUTO" ? "Modalidad ignorada" : rule.policyMode} · {rule.unitClass} · {rule.paymentFrequency} · {rule.rate}% · {rule.active ? "Activa" : "Inactiva"}</span>
               <Button type="button" variant="outline" size="sm" onClick={() => editRule(rule)}>Editar</Button>
             </div>
           ))}
@@ -74,7 +75,7 @@ export function CommissionRulesManager({ insurers: initialInsurers }: { insurers
       </FormSection>
 
       <form onSubmit={save}>
-        <FormSection title={form.id ? "Editar regla" : "Nueva regla"} description="La tasa aplica a la prima neta: prima total menos IVA, expedición y recargo fraccionado, más los descuentos visibles.">
+        <FormSection title={form.id ? "Editar regla" : "Nueva regla"} description={form.policyType === "AUTO" ? "Para AUTO, la comisión depende de la clase del vehículo; la cantidad de unidades y la modalidad de póliza no cambian la tasa. La tasa aplica a la prima neta: prima total menos IVA, expedición y recargo fraccionado, más los descuentos visibles." : "La tasa aplica a la prima neta: prima total menos IVA, expedición y recargo fraccionado, más los descuentos visibles."}>
           <FormGrid>
             <FormField label="Ramo">
               <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.policyType} onChange={(event) => change("policyType", event.target.value as CommissionRuleFormValues["policyType"])}>
@@ -82,12 +83,7 @@ export function CommissionRulesManager({ insurers: initialInsurers }: { insurers
               </select>
             </FormField>
             <FormField label="Producto o plan"><Input value={form.productPlan} onChange={(event) => change("productPlan", event.target.value)} required /></FormField>
-            <FormField label="Modalidad">
-              {form.policyType === "AUTO" ? <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.policyMode} onChange={(event) => change("policyMode", event.target.value)} required>
-                <option value="*">Cualquiera (*)</option><option value="INDIVIDUAL">Individual</option><option value="FLOTILLA">Flotilla</option>
-                {!['*', 'INDIVIDUAL', 'FLOTILLA'].includes(form.policyMode.toUpperCase()) ? <option value={form.policyMode}>{form.policyMode} (actual)</option> : null}
-              </select> : <Input value={form.policyMode} onChange={(event) => change("policyMode", event.target.value)} required placeholder="INDIVIDUAL, FLOTILLA o *" />}
-            </FormField>
+            {form.policyType === "AUTO" ? null : <FormField label="Modalidad"><Input value={form.policyMode} onChange={(event) => change("policyMode", event.target.value)} required placeholder="INDIVIDUAL, FLOTILLA o *" /></FormField>}
             <FormField label="Clase de riesgo / bien / persona">
               {form.policyType === "AUTO" ? <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.unitClass} onChange={(event) => change("unitClass", event.target.value)} required>
                 <option value="*">Cualquier unidad (*)</option><option value="AUTO_PARTICULAR">Auto particular</option><option value="CAMION_CARGA">Camión / carga</option><option value="TRACTOCAMION">Tractocamión</option><option value="MOTOCICLETA">Motocicleta</option><option value="AUTOBUS">Autobús</option><option value="OTRO">Otro</option>
