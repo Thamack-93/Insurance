@@ -32,7 +32,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
   await connection();
   const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const runId = (await searchParams)?.run;
-  const [sellers, run, recentRuns] = await withTenantTransaction(context, async (db) => Promise.all([
+  const [sellers, run, recentRuns, retentionStatus, databaseClockRows] = await withTenantTransaction(context, async (db) => Promise.all([
     db.user.findMany({
       where: { active: true, organizationMemberships: { some: { organizationId: context.organizationId, active: true } } },
       select: { id: true, name: true, email: true }, orderBy: { name: "asc" },
@@ -42,6 +42,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
       include: { seller: { select: { name: true } }, approvedBy: { select: { name: true } }, ruleSet: { select: { version: true, sourceFileName: true, sourceHash: true } }, items: { include: { payment: { select: { paidDate: true } }, policy: { select: { policyNumber: true } }, receipt: { select: { receiptNumber: true } } }, orderBy: [{ status: "asc" }, { createdAt: "asc" }] } },
     }) : null,
     db.bonusRun.findMany({ where: { organizationId: context.organizationId }, include: { seller: { select: { name: true } } }, orderBy: { updatedAt: "desc" }, take: 12 }),
+    db.maintenanceRun.findFirst({ where: { organizationId: context.organizationId, type: "BONUS_RUN_RETENTION" }, orderBy: { completedAt: "desc" } }),
+    db.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`,
   ]));
   if (runId && !run) notFound();
   const program = run ? resolveBonusProgram(run.programKey) : null;
@@ -51,6 +53,14 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
   }
   const latestRun = recentRuns[0];
   const latestProgram = latestRun ? resolveBonusProgram(latestRun.programKey) : null;
+  const retentionSummary = (() => {
+    try { return retentionStatus?.summaryJson ? JSON.parse(retentionStatus.summaryJson) as { durationMs?: number; purged?: number; failedOrganizations?: number; moreExpired?: boolean; retentionDays?: number } : null; }
+    catch { return null; }
+  })();
+  const retentionLabel = retentionStatus?.status === "COMPLETED" ? "Correcta" : retentionStatus?.status === "PARTIAL" ? "Parcial" : retentionStatus?.status === "FAILED" ? "Con error" : "Sin ejecución registrada";
+  const runExpiration = (updatedAt: Date) => new Date(updatedAt.getTime() + 5 * 24 * 60 * 60 * 1000);
+  const databaseNow = databaseClockRows[0].now;
+  const remainingDays = (expiresAt: Date) => Math.max(0, Math.ceil((expiresAt.getTime() - databaseNow.getTime()) / (24 * 60 * 60 * 1000)));
 
   return (
     <div className="flex flex-col gap-6">
@@ -58,6 +68,13 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
         <PageHeader eyebrow="Finanzas" title="Bonos e incentivos" description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles." />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <LocalNavigation items={commissionNavigation} label="Comisiones y bonos" variant="compact" />
+        </div>
+        <div className="rounded-lg border bg-card px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p><span className="font-medium">Retención automática:</span> {retentionLabel} · corridas y cierres se eliminan 5 días después de su última actualización.</p>
+            {retentionStatus?.completedAt ? <span className="text-xs text-muted-foreground">Último ciclo: {retentionStatus.completedAt.toLocaleString("es-MX")}{retentionSummary?.durationMs !== undefined ? ` · ${(retentionSummary.durationMs / 1000).toFixed(1)} s` : ""}{retentionSummary?.purged !== undefined ? ` · ${retentionSummary.purged} eliminadas` : ""}{retentionSummary?.failedOrganizations ? ` · ${retentionSummary.failedOrganizations} organización(es) con error` : ""}{retentionSummary?.moreExpired ? " · quedan corridas por procesar" : ""}</span> : null}
+          </div>
+          {retentionStatus && retentionStatus.status !== "COMPLETED" ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">El último ciclo quedó incompleto o con errores; revisa los logs del job `bonus-run-retention` en Vercel.</p> : null}
         </div>
         <SectionCard title="Nueva proyección" description="Elige el programa y el corte que corresponda. Los datos faltantes se marcarán para revisión antes de aprobar.">
           <div className="p-4 sm:p-5 lg:p-6">
@@ -86,7 +103,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
           const recentProgram = resolveBonusProgram(recent.programKey);
           const statusLabel = recent.status === "APPROVED" ? "Aprobado" : recent.status === "READY" ? "Listo para aprobar" : "Pendiente de revisión";
           return <Link key={recent.id} href={`/bonuses?run=${encodeURIComponent(recent.id)}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-muted/40">
-            <span className="min-w-0"><span className="block font-medium">{recentProgram?.label ?? recent.programKey} · {recent.seller.name}</span><span className="mt-1 block text-xs text-muted-foreground">{recent.year} · {recentProgram ? bonusPeriodLabel(recentProgram, recent.periodNumber) : recent.periodType === "ANNUAL" ? "Anual" : `T${recent.periodNumber}`}</span></span>
+            <span className="min-w-0"><span className="block font-medium">{recentProgram?.label ?? recent.programKey} · {recent.seller.name}</span><span className="mt-1 block text-xs text-muted-foreground">{recent.year} · {recentProgram ? bonusPeriodLabel(recentProgram, recent.periodNumber) : recent.periodType === "ANNUAL" ? "Anual" : `T${recent.periodNumber}`} · Se elimina en {remainingDays(runExpiration(recent.updatedAt))} días</span></span>
             <span className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${recent.status === "APPROVED" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : recent.status === "READY" ? "bg-primary/10 text-primary" : "bg-amber-500/10 text-amber-800 dark:text-amber-300"}`}>{statusLabel}</span><span className="font-medium tabular-nums">{bonusAmountLabel(recentProgram?.eligibilityOnly, recent.bonusAmount, recent.status)}</span></span>
           </Link>;
         })}
@@ -111,6 +128,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Tasa estimada</p><p className="mt-1 text-xl font-semibold tabular-nums">{bonusRateLabel(program.eligibilityOnly, run.bonusRate, run.status)}</p></div>
             <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Bono estimado</p><p className="mt-1 text-xl font-semibold tabular-nums">{bonusAmountLabel(program.eligibilityOnly, run.bonusAmount, run.status)}</p></div>
           </div>
+          <p className="mt-3 text-xs text-muted-foreground">Este corte se eliminará automáticamente el {runExpiration(run.updatedAt).toLocaleString("es-MX")} (5 días después de su última actualización). Descarga el detalle antes de esa fecha si necesitas conservarlo.</p>
           {program.eligibilityOnly ? <p className="mt-3 rounded-lg border p-3 text-sm">Estatus de elegibilidad: <strong>{snapshot.projection?.eligibilityOutcome === "ELIGIBLE" ? "Cumple los requisitos documentados" : snapshot.projection?.eligibilityOutcome === "NOT_ELIGIBLE" ? "No alcanza el requisito de prima neta total de $4,200,000" : "Pendiente de evidencia"}</strong></p> : null}
           {snapshot.projection?.reviewReasons?.length ? <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4"><p className="font-medium">Pendiente de revisión</p><ul className="mt-2 list-disc pl-5 text-sm">{snapshot.projection.reviewReasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></div> : null}
           <BonusRunItemsTable items={run.items.map((item) => ({
@@ -127,7 +145,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
           }))} />
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
           <p>{run.status === "APPROVED" ? `Aprobado por ${run.approvedBy?.name ?? "administración"} el ${run.approvedAt?.toLocaleDateString("es-MX")}.` : `Versión de cálculo ${run.version}.`} Reglas v{run.ruleSet.version} · {run.ruleSet.sourceFileName} · SHA-256 {run.ruleSet.sourceHash.slice(0, 12)}…</p>
-            {run.status !== "APPROVED" ? <form action={approveBonusRun}><input type="hidden" name="runId" value={run.id} /><input type="hidden" name="version" value={run.version} /><Button type="submit" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")}>Aprobar cierre</Button></form> : null}
+            {run.status !== "APPROVED" ? <form action={approveBonusRun} className="flex flex-col items-start gap-2 sm:items-end"><input type="hidden" name="runId" value={run.id} /><input type="hidden" name="version" value={run.version} /><label className="flex max-w-md items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")} /><span>Confirmo que revisé las partidas, exclusiones, evidencias, periodo y monto de este cierre.</span></label><Button type="submit" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")}>Aprobar cierre</Button></form> : null}
           </div>
         </SectionCard>
         ) : null}
