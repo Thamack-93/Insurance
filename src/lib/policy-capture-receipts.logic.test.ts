@@ -141,6 +141,55 @@ describe("policy-capture-receipts", () => {
     expect(payloads[0]!.discountAmount! / net(payloads[0]!)).toBeCloseTo(payloads[1]!.discountAmount! / net(payloads[1]!), 4);
   });
 
+  it("preserves policy totals across uneven quarterly receipts, including negative financing and cent residuals", () => {
+    const payloads = buildAutoCaptureReceiptPayloads({
+      organizationId: "org-test",
+      policyId: "policy-quarterly-breakdown",
+      clientId: "client-1",
+      insurerId: "insurer-1",
+      userId: "user-1",
+      premiumBreakdown: { issuanceExpenseAmount: 101.03, surchargeAmount: -120.07, discountAmount: 13.19 },
+      receiptPlan: [
+        { receiptNumber: "1", amount: 1000.01 },
+        { receiptNumber: "2", amount: 1000.02 },
+        { receiptNumber: "3", amount: 1000.03 },
+        { receiptNumber: "4", amount: 1000.04 },
+      ],
+      draft: {
+        policyNumber: "P-QUARTERLY",
+        clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        insurerName: "Aseguradora Demo",
+        policyType: "AUTO",
+        serialNumber: null,
+        startDate: "2026-01-01",
+        endDate: "2027-01-01",
+        issueDate: null,
+        paymentFrequency: "QUARTERLY",
+        paymentPlan: null,
+        premiumAmount: 4000.10,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: null,
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      },
+    });
+
+    expect(payloads).toHaveLength(4);
+    expect(payloads[0]?.issuanceExpenseAmount).toBe(101.03);
+    expect(payloads.slice(1).every((item) => item.issuanceExpenseAmount === 0)).toBe(true);
+    expect(payloads.reduce((sum, item) => sum + item.vatAmount!, 0)).toBeCloseTo(551.74, 2);
+    expect(payloads.reduce((sum, item) => sum + item.surchargeAmount!, 0)).toBeCloseTo(-120.07, 2);
+    expect(payloads.reduce((sum, item) => sum + item.discountAmount!, 0)).toBeCloseTo(13.19, 2);
+    expect(payloads.every((item) => item.surchargeAmount! <= 0)).toBe(true);
+  });
+
   it("uses matching notice vencimiento and control number for a single receipt", () => {
     const payload = buildAutoCaptureReceiptPayload({
       organizationId: "org-test",

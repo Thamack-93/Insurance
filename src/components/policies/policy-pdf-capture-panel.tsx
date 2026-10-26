@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { CommandPalette, type CommandPaletteGroup } from "@/components/command/command-palette";
 import { clientTypeOptions, currencyOptions, paymentFrequencyOptions, policyTypeOptions } from "@/lib/domain-options";
 import { formatCurrency } from "@/lib/money";
-import { calculateVatFromGross } from "@/lib/premium-breakdown";
+import { calculateVatFromGross, deriveNetPremium } from "@/lib/premium-breakdown";
 import { formatDate } from "@/lib/dates";
 import { statusLabel } from "@/lib/status";
 import {
@@ -195,6 +195,14 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
   const [pdfReference, setPdfReference] = useState<{ url: string; fileName: string; expiresAt: number } | null>(null);
   const [preview, setPreview] = useState<PolicyPdfCapturePreview | null>(null);
   const [draft, setDraft] = useState<PolicyPdfCaptureDraft | null>(null);
+  const policyNetPremium = draft
+    ? deriveNetPremium(draft.premiumAmount, {
+        vatAmount: calculateVatFromGross(draft.premiumAmount),
+        issuanceExpenseAmount: draft.premiumIssuanceExpenseAmount,
+        surchargeAmount: draft.premiumSurchargeAmount,
+        discountAmount: draft.premiumDiscountAmount,
+      })
+    : null;
   const [receiptPlanOverrides, setReceiptPlanOverrides] = useState<PolicyPdfCaptureReceiptPlanItem[]>([]);
   const [fieldConfidence, setFieldConfidence] = useState<PolicyPdfCaptureFieldConfidence>(createEmptyConfidence());
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -1293,7 +1301,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                           <span>{label}</span>
                           <Input
                             type="number"
-                            min="0"
+                            min={key === "premiumSurchargeAmount" ? undefined : "0"}
                             step="0.01"
                             placeholder="Pendiente"
                             value={draft[key] ?? ""}
@@ -1302,7 +1310,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                         </label>
                       ))}
                     </div>
-                    <p className="text-xs text-muted-foreground">Se captura una vez por póliza. El sistema calcula el IVA al 16% de la base antes de IVA, reparte recargo y descuentos proporcionalmente a la prima neta de cada recibo y asigna toda la expedición al primero. Usa 0 cuando confirmes que un concepto no aplica. IVA calculado: {formatCurrency(calculateVatFromGross(draft.premiumAmount) ?? 0, draft.currency)}.</p>
+                    <p className="text-xs text-muted-foreground">Se captura una vez por póliza. El sistema calcula el IVA al 16% de la base antes de IVA, reparte recargo y descuentos proporcionalmente a la prima neta de cada recibo y asigna toda la expedición al primero. Usa 0 cuando confirmes que un concepto no aplica. IVA calculado: {formatCurrency(calculateVatFromGross(draft.premiumAmount) ?? 0, draft.currency)}. Prima neta total: {policyNetPremium === null ? "completa el desglose para calcularla" : formatCurrency(policyNetPremium, draft.currency)}.</p>
                   </Field>
                   <Field label="Comisión específica de póliza (%)" confidence="medium">
                     <div className="space-y-1.5">

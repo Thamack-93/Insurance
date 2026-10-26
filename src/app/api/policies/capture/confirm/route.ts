@@ -9,6 +9,7 @@ import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
 import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { policyPremiumBreakdownCaptureSchema } from "@/lib/validations";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts, syncPolicyPremiumBreakdownToReceipts } from "@/lib/policy-capture-receipts";
 import { calculateVatFromGross } from "@/lib/premium-breakdown";
@@ -43,9 +44,7 @@ const confirmSchema = z.object({
     paymentFrequency: z.string().min(1),
     paymentPlan: z.string().nullable().optional(),
     premiumAmount: z.number(),
-    premiumIssuanceExpenseAmount: z.number().nonnegative().nullable().optional(),
-    premiumSurchargeAmount: z.number().nonnegative().nullable().optional(),
-    premiumDiscountAmount: z.number().nonnegative().nullable().optional(),
+    ...policyPremiumBreakdownCaptureSchema.shape,
     commissionRateOverride: z.number().min(0).max(100).refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-7).nullable().optional(),
     currency: z.string().min(1),
     requestNumber: z.string().nullable().optional(),
