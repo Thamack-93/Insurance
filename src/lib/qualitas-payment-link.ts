@@ -24,6 +24,7 @@ export type QualitasPaymentLinkOutcome = (typeof QUALITAS_PAYMENT_LINK_OUTCOMES)
 export const QUALITAS_PAYMENT_LINK_REASONS = [
   "SUCCESS_CODE_0",
   "DUPLICATE_LINK_99991",
+  "ACCESS_REJECTED",
   "FINAL_RESPONSE_UNRECOGNIZED",
   "FINAL_TIMEOUT",
   "FLOW_CHANGED",
@@ -60,7 +61,7 @@ export type QualitasPaymentLinkDeliveryMethod = "EMAIL" | "WHATSAPP";
 export type QualitasReceiptLookupResult =
   | { outcome: "OK"; nextDueDate: string }
   | { outcome: "ALREADY_PAID" }
-  | { outcome: "INCONCLUSIVE"; reason: "INVALID_INPUT" | "FLOW_CHANGED" | "PROVIDER_UNAVAILABLE" | "CHALLENGE" | "RECEIPT_DATE_NOT_FOUND" };
+  | { outcome: "INCONCLUSIVE"; reason: "INVALID_INPUT" | "FLOW_CHANGED" | "ACCESS_REJECTED" | "PROVIDER_UNAVAILABLE" | "CHALLENGE" | "RECEIPT_DATE_NOT_FOUND" };
 type QualitasReceiptLookupReason = Extract<QualitasReceiptLookupResult, { outcome: "INCONCLUSIVE" }>["reason"];
 
 export type QualitasPreparedPaymentLink = {
@@ -109,6 +110,7 @@ export type QualitasProviderEvent = {
   hasPolicyComponent?: boolean;
   receiptLookupOutcome?: QualitasReceiptLookupResult["outcome"];
   receiptLookupReason?: QualitasReceiptLookupReason;
+  rejectionClassification?: "ACCESS_REJECTED" | "NONE";
   hasContactForm?: boolean;
   hasResumeMarker?: boolean;
   hasVisibleContactForm?: boolean;
@@ -276,6 +278,10 @@ function contentTypeFamily(value: string | null | undefined): QualitasProviderEv
   return normalized ? "other" : "unknown";
 }
 
+function isQualitasAccessRejectedPage(value: string | null | undefined) {
+  return /request\s+rejected/i.test(value ?? "");
+}
+
 function classifyQualitasProviderResponse(input: {
   status?: number;
   bodyText?: string | null;
@@ -286,6 +292,16 @@ function classifyQualitasProviderResponse(input: {
   redirectedToUnexpectedHost?: boolean;
 }): QualitasProviderClassification {
   const contentType = contentTypeFamily(input.contentType);
+  const accessRejected = isQualitasAccessRejectedPage(input.bodyText);
+  if (accessRejected) {
+    return {
+      ...qualitasResult(input.finalSubmission ? "UNCERTAIN_POST_SUBMISSION" : "PROVIDER_FLOW_CHANGED", "ACCESS_REJECTED"),
+      contentType,
+      signalTextLength: input.bodyText?.length ?? 0,
+      signals: emptyQualitasSignals(),
+      duplicateEvidence: "NONE",
+    };
+  }
   const visibleText = providerSignalText(input.bodyText, contentType);
   const acuseText = providerAcuseSignalText(input.bodyText, contentType);
   const text = input.finalSubmission ? acuseText : visibleText;
@@ -1036,7 +1052,7 @@ async function requestWithSession(input: {
         await input.options.onFinalSubmissionStarted?.();
         finalSubmissionStarted = true;
       }
-      const response = await transport(url, { ...init, headers, redirect: "manual", signal: controller.signal });
+      const response = await transport(url, { ...init, cache: "no-store", headers, redirect: "manual", signal: controller.signal });
       updateCookieJar(response, input.cookieJar);
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
@@ -1084,7 +1100,8 @@ async function requestWithSession(input: {
         continue;
       }
       const bodyText = await readBoundedResponseText(response, maxResponseBytes);
-      const structure = contentTypeFamily(response.headers.get("content-type")) === "html"
+      const accessRejected = isQualitasAccessRejectedPage(bodyText);
+      const structure = contentTypeFamily(response.headers.get("content-type")) === "html" && !accessRejected
         ? policyFormDiagnostics(bodyText, url)
         : {};
       emitQualitasProviderEvent(input.options, {
@@ -1098,8 +1115,32 @@ async function requestWithSession(input: {
         finalSubmission: input.finalSubmission,
         bodyBytes: new TextEncoder().encode(bodyText).byteLength,
         contentType: contentTypeFamily(response.headers.get("content-type")),
+        rejectionClassification: accessRejected ? "ACCESS_REJECTED" : "NONE",
         ...structure,
       });
+      if (accessRejected) {
+        const classification = classifyQualitasProviderResponse({
+          status: response.status,
+          bodyText,
+          contentType: response.headers.get("content-type"),
+          finalSubmission: input.finalSubmission,
+        });
+        emitQualitasProviderEvent(input.options, {
+          step: input.step,
+          phase: "classified",
+          method,
+          path: safeQualitasPath(url),
+          status: response.status,
+          durationMs: Date.now() - startedAt,
+          redirectCount: redirect,
+          finalSubmission: input.finalSubmission,
+          bodyBytes: new TextEncoder().encode(bodyText).byteLength,
+          contentType: contentTypeFamily(response.headers.get("content-type")),
+          rejectionClassification: "ACCESS_REJECTED",
+          outcome: classification.outcome,
+          reason: classification.reason,
+        });
+      }
       return { response, bodyText, finalUrl: url, redirectCount: redirect };
     } catch (error) {
       if (input.finalSubmission && finalSubmissionClaimAttempted && !finalSubmissionStarted) {
@@ -1168,6 +1209,7 @@ async function requestQualitasPolicyLookup(
     step: "entrypoint",
   });
   if (!initial.bodyText) return { ok: false, cookieJar, initial };
+  if (isQualitasAccessRejectedPage(initial.bodyText)) return { ok: false, cookieJar, initial };
 
   const lookup = findQualitasPolicyLookupRequest(initial.bodyText, initial.finalUrl);
   if (!lookup) return { ok: false, cookieJar, initial };
@@ -1278,6 +1320,10 @@ export async function prepareQualitasPaymentLink(
   const policyLookup = await requestQualitasPolicyLookup(policyNumber, options);
   const { cookieJar, initial } = policyLookup;
   if (!initial.bodyText) return resultForSessionResponse(initial, false, options);
+  if (isQualitasAccessRejectedPage(initial.bodyText)) {
+    const classification = classifyQualitasProviderResponse({ status: initial.response?.status, bodyText: initial.bodyText, contentType: initial.response?.headers.get("content-type") });
+    return qualitasResult(classification.outcome, classification.reason);
+  }
   if (!policyLookup.ok) {
     emitQualitasProviderEvent(options, {
       step: "entrypoint",
@@ -1291,6 +1337,10 @@ export async function prepareQualitasPaymentLink(
   }
   const policyResponse = policyLookup.policyResponse;
   if (!policyResponse.bodyText) return resultForSessionResponse(policyResponse, false, options);
+  if (isQualitasAccessRejectedPage(policyResponse.bodyText)) {
+    const classification = classifyQualitasProviderResponse({ status: policyResponse.response?.status, bodyText: policyResponse.bodyText, contentType: policyResponse.response?.headers.get("content-type") });
+    return qualitasResult(classification.outcome, classification.reason);
+  }
 
   const policyHtml = policyResponse.bodyText;
   let contactPage = policyResponse;
@@ -1336,6 +1386,10 @@ export async function prepareQualitasPaymentLink(
     });
     const pagarHtml = pagarResponse.bodyText;
     if (!pagarHtml) return resultForSessionResponse(pagarResponse, false, options);
+    if (isQualitasAccessRejectedPage(pagarHtml)) {
+      const classification = classifyQualitasProviderResponse({ status: pagarResponse.response?.status, bodyText: pagarHtml, contentType: pagarResponse.response?.headers.get("content-type") });
+      return qualitasResult(classification.outcome, classification.reason);
+    }
     contactPage = pagarResponse;
     contactForm = findFormContaining(pagarHtml, "temail");
   }
@@ -1399,9 +1453,11 @@ export async function lookupQualitasPendingReceipts(
       path: details.finalUrl ? safeQualitasPath(details.finalUrl) : undefined,
       status: details.status,
       finalSubmission: false,
-      ...(details.html ? policyFormDiagnostics(details.html, details.finalUrl ?? QUALITAS_PAYMENT_LINK_ENTRYPOINT) : {}),
+      ...(details.html && !isQualitasAccessRejectedPage(details.html) ? policyFormDiagnostics(details.html, details.finalUrl ?? QUALITAS_PAYMENT_LINK_ENTRYPOINT) : {}),
       receiptLookupOutcome: result.outcome,
       ...(result.outcome === "INCONCLUSIVE" ? { receiptLookupReason: result.reason } : {}),
+      rejectionClassification: details.html && isQualitasAccessRejectedPage(details.html) ? "ACCESS_REJECTED" : "NONE",
+      bodyBytes: details.html ? new TextEncoder().encode(details.html).byteLength : undefined,
     });
     return result;
   };
@@ -1412,6 +1468,9 @@ export async function lookupQualitasPendingReceipts(
   if (initial.bodyText && looksLikeQualitasChallenge(initial.bodyText)) {
     return finish({ outcome: "INCONCLUSIVE", reason: "CHALLENGE" }, "entrypoint", { status: initial.response?.status, finalUrl: initial.finalUrl, html: initial.bodyText });
   }
+  if (initial.bodyText && isQualitasAccessRejectedPage(initial.bodyText)) {
+    return finish({ outcome: "INCONCLUSIVE", reason: "ACCESS_REJECTED" }, "entrypoint", { status: initial.response?.status, finalUrl: initial.finalUrl, html: initial.bodyText });
+  }
   if (!initial.bodyText) {
     return finish({ outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" }, "entrypoint", { status: initial.response?.status, finalUrl: initial.finalUrl });
   }
@@ -1420,6 +1479,9 @@ export async function lookupQualitasPendingReceipts(
     return finish({ outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" }, "entrypoint", { status: initial.response?.status, finalUrl: initial.finalUrl, html: initial.bodyText });
   }
   const policyResponse = policyLookup.policyResponse;
+  if (policyResponse.bodyText && isQualitasAccessRejectedPage(policyResponse.bodyText)) {
+    return finish({ outcome: "INCONCLUSIVE", reason: "ACCESS_REJECTED" }, "policy_lookup", { status: policyResponse.response?.status, finalUrl: policyResponse.finalUrl, html: policyResponse.bodyText });
+  }
   if (policyResponse.bodyText && looksLikeQualitasChallenge(policyResponse.bodyText)) {
     return finish({ outcome: "INCONCLUSIVE", reason: "CHALLENGE" }, "policy_lookup", { status: policyResponse.response?.status, finalUrl: policyResponse.finalUrl, html: policyResponse.bodyText });
   }
@@ -1449,6 +1511,9 @@ export async function lookupQualitasPendingReceipts(
       finalSubmission: false,
       step: "pagar_ahora",
     });
+    if (paymentPage.bodyText && isQualitasAccessRejectedPage(paymentPage.bodyText)) {
+      return finish({ outcome: "INCONCLUSIVE", reason: "ACCESS_REJECTED" }, "pagar_ahora", { status: paymentPage.response?.status, finalUrl: paymentPage.finalUrl, html: paymentPage.bodyText });
+    }
     if (paymentPage.bodyText && looksLikeQualitasChallenge(paymentPage.bodyText)) {
       return finish({ outcome: "INCONCLUSIVE", reason: "CHALLENGE" }, "pagar_ahora", { status: paymentPage.response?.status, finalUrl: paymentPage.finalUrl, html: paymentPage.bodyText });
     }

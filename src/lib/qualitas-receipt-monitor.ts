@@ -21,6 +21,9 @@ function logQualitasReceiptProviderEvent(event: QualitasProviderEvent) {
       phase: event.phase,
       status: event.status,
       durationMs: event.durationMs,
+      redirectCount: event.redirectCount,
+      bodyBytes: event.bodyBytes,
+      rejectionClassification: event.rejectionClassification,
       contentType: event.contentType,
       formCount: event.formCount,
       hasPolicyForm: event.hasPolicyForm,
@@ -118,6 +121,12 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
     const target = targetReceiptId
       ? current.receipts.find((receipt) => receipt.id === targetReceiptId)
       : undefined;
+    const dateDiffers = Boolean(target && portalDueDate && dateKey(target.dueDate) !== portalDueDate);
+    const comparisonReason = lookup.outcome === "INCONCLUSIVE"
+      ? lookup.reason
+      : dateDiffers
+        ? "DUE_DATE_MISMATCH"
+        : currentComparison?.status === "INCONCLUSIVE" ? currentComparison.reason : undefined;
     const checked = await writeActivityLog({
       organizationId: context.organizationId,
       entityType: "Policy",
@@ -125,7 +134,7 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
       action: "QUALITAS_RECEIPT_CHECKED",
       newValue: {
         status: resultStatus,
-        reason: lookup.outcome === "INCONCLUSIVE" ? lookup.reason : undefined,
+        reason: comparisonReason,
         targetReceiptId: target?.id,
         localDueDate: target ? dateKey(target.dueDate) : undefined,
         targetReceiptAmount: target?.amount,
@@ -148,7 +157,7 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
         amount: target.amount,
         currency: target.currency,
       } : null,
-      reason: lookup.outcome === "INCONCLUSIVE" ? lookup.reason : undefined,
+      reason: comparisonReason,
     };
   });
 }
