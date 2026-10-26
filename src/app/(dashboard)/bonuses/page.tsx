@@ -8,7 +8,7 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { withTenantTransaction, requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { BONUS_PROGRAMS, resolveBonusProgram } from "@/lib/bonus-rules";
 import { bonusPeriodLabel } from "@/lib/bonus-periods";
-import { acceptBonusRunPolicyPremium, approveBonusRun } from "./actions";
+import { acceptBonusRunPolicyPremium, acceptBonusRunPremiumBatch, approveBonusRun } from "./actions";
 import { ExportButtons } from "@/components/reports/export-buttons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
@@ -182,17 +182,32 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             evidenceJson: item.evidenceJson,
           }))} />
           {premiumReviewGroups.length ? <div className="mt-5 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-            <h3 className="font-medium">Aceptar prima neta de un desglose por unidad</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Esto hace computables sólo las partidas de la póliza seleccionada dentro de esta versión. Registra tu aceptación en la evidencia del cierre y no aprueba el cierre.</p>
-            <div className="mt-3 divide-y rounded-md border bg-background">
-              {premiumReviewGroups.map((group) => <form key={group.policyId} action={acceptBonusRunPolicyPremium} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
-                <input type="hidden" name="runId" value={run.id} />
-                <input type="hidden" name="policyId" value={group.policyId} />
-                <input type="hidden" name="version" value={run.version} />
-                <div><p className="text-sm font-medium">Póliza {group.policyNumber} · {group.count} {group.count === 1 ? "pago" : "pagos"} · {formatCurrency(group.netPremium, "MXN")} de PNP</p><label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Acepto la prima neta derivada para esta póliza y esta proyección, con base en los importes registrados.</span></label></div>
-                <Button type="submit" variant="outline">Hacer computables</Button>
-              </form>)}
-            </div>
+            <h3 className="font-medium">Aceptar prima neta derivada</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Las estimaciones de la siguiente acción vienen del desglose por unidad. La aceptación queda registrada en esta corrida y no aprueba el cierre.</p>
+            <form action={acceptBonusRunPremiumBatch} className="mt-3 rounded-md border bg-background p-3">
+              <input type="hidden" name="runId" value={run.id} />
+              <input type="hidden" name="version" value={run.version} />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium">Aceptar todas las pendientes elegibles: {premiumReviewGroups.length} {premiumReviewGroups.length === 1 ? "póliza" : "pólizas"} · {premiumReviewGroups.reduce((sum, group) => sum + group.count, 0)} pagos · {formatCurrency(premiumReviewGroups.reduce((sum, group) => sum + group.netPremium, 0), "MXN")} de PNP</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Sólo acepta partidas con PNP completa derivada por unidad; otras causas de revisión permanecen pendientes.</p>
+                  <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Revisé el resumen y acepto como computables todas las partidas elegibles de PNP listadas para esta corrida.</span></label>
+                </div>
+                <Button type="submit">Aceptar todas</Button>
+              </div>
+            </form>
+            <details className="group mt-3 rounded-md border bg-background">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-muted/40">Revisar o aceptar por póliza</summary>
+              <div className="divide-y border-t">
+                {premiumReviewGroups.map((group) => <form key={group.policyId} action={acceptBonusRunPolicyPremium} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <input type="hidden" name="runId" value={run.id} />
+                  <input type="hidden" name="policyId" value={group.policyId} />
+                  <input type="hidden" name="version" value={run.version} />
+                  <div><p className="text-sm font-medium">Póliza {group.policyNumber} · {group.count} {group.count === 1 ? "pago" : "pagos"} · {formatCurrency(group.netPremium, "MXN")} de PNP</p><label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Acepto la prima neta derivada para esta póliza y esta proyección, con base en los importes registrados.</span></label></div>
+                  <Button type="submit" variant="outline">Hacer computables</Button>
+                </form>)}
+              </div>
+            </details>
           </div> : null}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
           <p>{run.status === "APPROVED" ? `Aprobado por ${run.approvedBy?.name ?? "administración"} el ${run.approvedAt?.toLocaleDateString("es-MX")}.` : `Versión de cálculo ${run.version}.`} Reglas v{run.ruleSet.version} · {run.ruleSet.sourceFileName} · SHA-256 {run.ruleSet.sourceHash.slice(0, 12)}…</p>
