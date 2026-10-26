@@ -17,7 +17,7 @@ import { withTenantOrganization } from "@/lib/tenant-dal";
 import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
 import { deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 import { autoPolicyModeForCount, autoVehicleCount } from "@/lib/auto-policy-mode";
-import { calculateCommissionEstimate, canCalculateCommissionForReceipt, parseCommissionRules, roundMoney, shouldUseAggregatePolicyOverride, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
+import { calculateCommissionEstimate, canCalculateCommissionForReceipt, parseCommissionRules, roundMoney, shouldRequirePolicyPremiumReconciliation, shouldUseAggregatePolicyOverride, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
 
 type CommissionScope = {
   organizationId: string;
@@ -124,9 +124,9 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
           cancelledAt: row.cancelledAt,
           cancellationReason: row.cancellationReason,
           postedPaymentCount: row.payments.length,
-        })));
+        })), { includePaidCancelledReceipts: true });
       }
-      if (reconciliation.status !== "RECONCILED") {
+      if (reconciliation.status !== "RECONCILED" && shouldRequirePolicyPremiumReconciliation(receipt.status, receipt.payments.length)) {
         const reason = `La prima no concilia con los recibos vigentes (diferencia ${reconciliation.difference.toFixed(2)} ${receipt.currency}); revisa recibos antes de calcular.`;
         await tx.receipt.update({ where: { id: receipt.id }, data: { commissionCalculationStatus: "REVIEW", commissionReviewReason: reason, updatedById: context.userId } });
         return errorResult(reason);

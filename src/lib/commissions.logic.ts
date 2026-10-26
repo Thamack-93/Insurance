@@ -58,6 +58,11 @@ export function canCalculateCommissionForReceipt(receiptStatus: string, postedPa
   return receiptStatus !== "CANCELLED" || postedPaymentCount > 0;
 }
 
+/** An individually paid cancelled receipt is commissionable from its own evidence. */
+export function shouldRequirePolicyPremiumReconciliation(receiptStatus: string, postedPaymentCount: number) {
+  return receiptStatus !== "CANCELLED" || postedPaymentCount === 0;
+}
+
 /**
  * A policy-specific override applies uniformly to the policy, so a complete
  * receipt-level premium breakdown is enough when no per-unit allocation exists.
