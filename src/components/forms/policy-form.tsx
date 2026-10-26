@@ -5,6 +5,8 @@ import { useEffect, useState, useTransition } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { formatCurrency } from "@/lib/money";
+import { calculateVatFromGross } from "@/lib/premium-breakdown";
 import {
   currencyOptions,
   paymentFrequencyOptions,
@@ -88,6 +90,8 @@ export function PolicyForm({
   const selectedPolicyType = useWatch({ control, name: "policyType" });
   const watchedClientId = useWatch({ control, name: "clientId" });
   const watchedStartDate = useWatch({ control, name: "startDate" });
+  const watchedPremiumAmount = useWatch({ control, name: "premiumAmount" });
+  const watchedCurrency = useWatch({ control, name: "currency" });
   const watchedRiskDetails = useWatch({ control, name: "riskDetails" });
   const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
   const [renewalCandidateResult, setRenewalCandidateResult] = useState<{ key: string; candidates: SerialRenewalCandidate[] } | null>(null);
@@ -226,7 +230,7 @@ export function PolicyForm({
             </FormGrid>
           </FormSection>
 
-          <FormSection title="Vigencia y cobro" description="Fechas y monetización de la cobertura.">
+          <FormSection title="Vigencia y cobro" description="Fechas, prima total y forma de pago de la cobertura.">
             <FormGrid>
               <FormField label="Inicio" htmlFor="startDate" error={errors.startDate?.message}>
                 <Input id="startDate" type="date" {...register("startDate")} />
@@ -275,6 +279,21 @@ export function PolicyForm({
                     />
                   )}
                 />
+              </FormField>
+            </FormGrid>
+          </FormSection>
+
+          <FormSection title="Desglose total de prima" description="Captura una sola vez los importes de toda la vigencia. El IVA se calcula al 16% de la base antes de IVA; recargo y descuentos se distribuyen según la prima neta de cada recibo, y los gastos de expedición se asignan al primero. Los centavos residuales se ajustan en el último recibo. Deja en blanco lo que aún no indique la póliza; captura 0 cuando la aseguradora confirme que no aplica.">
+            <FormGrid>
+              <div className="rounded-md border bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">IVA total calculado (16% de la base antes de IVA): </span><strong>{formatCurrency(calculateVatFromGross(Number(watchedPremiumAmount)) ?? 0, watchedCurrency)}</strong></div>
+              <FormField label="Gastos de expedición totales" htmlFor="premiumIssuanceExpenseAmount" error={errors.premiumIssuanceExpenseAmount?.message}>
+                <Input id="premiumIssuanceExpenseAmount" type="number" min="0" step="0.01" placeholder="Pendiente" {...register("premiumIssuanceExpenseAmount")} />
+              </FormField>
+              <FormField label="Recargo fraccionado total" htmlFor="premiumSurchargeAmount" error={errors.premiumSurchargeAmount?.message}>
+                <Input id="premiumSurchargeAmount" type="number" min="0" step="0.01" placeholder="Pendiente" {...register("premiumSurchargeAmount")} />
+              </FormField>
+              <FormField label="Descuentos totales" htmlFor="premiumDiscountAmount" error={errors.premiumDiscountAmount?.message}>
+                <Input id="premiumDiscountAmount" type="number" min="0" step="0.01" placeholder="Pendiente" {...register("premiumDiscountAmount")} />
               </FormField>
             </FormGrid>
           </FormSection>

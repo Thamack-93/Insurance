@@ -21,6 +21,9 @@ export type PolicyPdfCaptureDraft = {
   paymentFrequency: string;
   paymentPlan: string | null;
   premiumAmount: number;
+  premiumIssuanceExpenseAmount?: number | null;
+  premiumSurchargeAmount?: number | null;
+  premiumDiscountAmount?: number | null;
   commissionRateOverride?: number | null;
   currency: string;
   requestNumber: string | null;

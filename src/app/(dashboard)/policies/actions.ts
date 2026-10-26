@@ -11,7 +11,8 @@ import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "
 import { assertOrganizationContextInTransaction, requireOrganizationContext, type OrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
-import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
+import { syncAutoCaptureReceipts, syncPolicyPremiumBreakdownToReceipts } from "@/lib/policy-capture-receipts";
+import { calculateVatFromGross } from "@/lib/premium-breakdown";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { hasPolicyRiskData, policyInsuredObjectForSave, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 import { syncPolicyRiskRelations } from "@/lib/policy-risk-relations";
@@ -28,6 +29,10 @@ function normalizePolicyInput(values: PolicyFormValues) {
     startDate: parseDateInput(values.startDate),
     endDate: parseDateInput(values.endDate),
     premiumAmount: values.premiumAmount,
+    premiumVatAmount: calculateVatFromGross(values.premiumAmount),
+    premiumIssuanceExpenseAmount: values.premiumIssuanceExpenseAmount === "" || values.premiumIssuanceExpenseAmount === undefined ? null : values.premiumIssuanceExpenseAmount,
+    premiumSurchargeAmount: values.premiumSurchargeAmount === "" || values.premiumSurchargeAmount === undefined ? null : values.premiumSurchargeAmount,
+    premiumDiscountAmount: values.premiumDiscountAmount === "" || values.premiumDiscountAmount === undefined ? null : values.premiumDiscountAmount,
     commissionRateOverride: values.commissionRateOverride === "" || values.commissionRateOverride === undefined
       ? null
       : values.commissionRateOverride,
@@ -269,6 +274,11 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
           currency: normalized.currency,
           sourcePolicyNumber: currentRenewalSource?.policyNumber ?? null,
         },
+        premiumBreakdown: {
+          issuanceExpenseAmount: normalized.premiumIssuanceExpenseAmount,
+          surchargeAmount: normalized.premiumSurchargeAmount,
+          discountAmount: normalized.premiumDiscountAmount,
+        },
       });
 
       for (const result of receipts) {
@@ -433,6 +443,16 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           ...(confirmedBonusSellerId ? { bonusSellerId: confirmedBonusSellerId } : {}),
           status: (normalized.renewedFromPolicyId || renewalChanged) ? "ACTIVE" : normalized.status,
           updatedById: userId,
+        },
+      });
+      await syncPolicyPremiumBreakdownToReceipts(tx, {
+        organizationId: context.organizationId,
+        policyId: id,
+        userId,
+        breakdown: {
+          issuanceExpenseAmount: normalized.premiumIssuanceExpenseAmount,
+          surchargeAmount: normalized.premiumSurchargeAmount,
+          discountAmount: normalized.premiumDiscountAmount,
         },
       });
       const submittedRiskDetails = policyRiskDetailsSchema.safeParse(parsed.data.riskDetails);
