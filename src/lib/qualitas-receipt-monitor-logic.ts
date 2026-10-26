@@ -3,7 +3,7 @@ export type QualitasMonitorReceipt = { id: string; dueDate: Date | string; statu
 export type QualitasMonitorComparison =
   | { status: "PENDING"; targetReceiptId: string; localDueDate: string; portalDueDate: string }
   | { status: "LIKELY_ADVANCED"; targetReceiptId: string; localDueDate: string; portalDueDate: string; nextLocalDueDate: string }
-  | { status: "INCONCLUSIVE"; targetReceiptId?: string; localDueDate?: string; portalDueDate: string | null };
+  | { status: "INCONCLUSIVE"; targetReceiptId?: string; localDueDate?: string; portalDueDate: string | null; reason?: "DUE_DATE_MISMATCH" };
 
 function dateKey(value: Date | string) {
   if (typeof value === "string") return value.slice(0, 10);
@@ -33,5 +33,5 @@ export function compareQualitasNextReceipt(
       nextLocalDueDate: next.dueDateKey,
     };
   }
-  return { status: "INCONCLUSIVE", targetReceiptId: current.id, localDueDate: current.dueDateKey, portalDueDate };
+  return { status: "INCONCLUSIVE", targetReceiptId: current.id, localDueDate: current.dueDateKey, portalDueDate, reason: "DUE_DATE_MISMATCH" };
 }

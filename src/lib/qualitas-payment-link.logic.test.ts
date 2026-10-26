@@ -111,6 +111,44 @@ describe("qualitas-payment-link provider", () => {
     expect(calls).toHaveLength(3);
     expect(calls.map(({ init }) => init?.method ?? "GET")).toEqual(["GET", "POST", "GET"]);
     expect(calls.some(({ url }) => new URL(url).searchParams.get("_pagopoliza_WAR_PagoPolizaportlet_myaction") === "envia-link-pago")).toBe(false);
+    expect(calls.every(({ init }) => init?.cache === "no-store")).toBe(true);
+  });
+
+  it("classifies the HTTP 200 Request Rejected page before looking for a portal form", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const rejected = sequenceTransport([response("<html><title>Request Rejected</title><p>Consult your administrator.</p></html>")]);
+
+    await expect(lookupQualitasPendingReceipts("0000000000", {
+      transport: rejected.transport,
+      onEvent: (event) => events.push(event),
+    })).resolves.toEqual({ outcome: "INCONCLUSIVE", reason: "ACCESS_REJECTED" });
+    expect(rejected.calls).toHaveLength(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      step: "entrypoint",
+      status: 200,
+      bodyBytes: expect.any(Number),
+      rejectionClassification: "ACCESS_REJECTED",
+      receiptLookupReason: "ACCESS_REJECTED",
+    }));
+    expect(JSON.stringify(events)).not.toContain("Consult your administrator");
+  });
+
+  it("follows a same-host redirect without losing session cookies and disables cache", async () => {
+    const { transport, calls } = sequenceTransport([
+      new Response(null, { status: 302, headers: { location: "/web/qmx/pago-de-poliza/start", "set-cookie": "JSESSIONID=redirect-session; Path=/" } }),
+      response(initialHtml),
+      response(contactHtml),
+    ]);
+
+    const result = await prepareQualitasPaymentLink(
+      { policyNumber: "0000000000", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "redirect-correlation" },
+      { transport },
+    );
+
+    expect(result).toMatchObject({ transportReady: true });
+    expect(calls).toHaveLength(3);
+    expect(calls.every(({ init }) => init?.cache === "no-store")).toBe(true);
+    expect(new Headers(calls[2].init?.headers).get("Cookie")).toContain("JSESSIONID=redirect-session");
   });
 
   it("uses the observed Quálitas AJAX portlet lookup and keeps receipt checks read-only", async () => {
@@ -562,6 +600,20 @@ describe("qualitas-payment-link provider", () => {
     });
   });
 
+  it("keeps a Request Rejected response after the final POST uncertain", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response("<html><title>Request Rejected</title></html>"),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "UNCERTAIN_POST_SUBMISSION",
+      reason: "ACCESS_REJECTED",
+    });
+  });
+
   it("fails closed on a cross-host redirect", async () => {
     const transport: QualitasHttpTransport = vi.fn(async () =>
       new Response(null, { status: 302, headers: { location: "https://evil.example/payment" } }),
@@ -678,6 +730,11 @@ describe("Qualitas receipt monitor comparison", () => {
   });
 
   it("does not infer payment when the portal date has no exact next local match", () => {
-    expect(compareQualitasNextReceipt("2026-12-12", receipts)).toMatchObject({ status: "INCONCLUSIVE" });
+    expect(compareQualitasNextReceipt("2026-12-12", receipts)).toMatchObject({
+      status: "INCONCLUSIVE",
+      reason: "DUE_DATE_MISMATCH",
+      localDueDate: "2026-10-12",
+      portalDueDate: "2026-12-12",
+    });
   });
 });
