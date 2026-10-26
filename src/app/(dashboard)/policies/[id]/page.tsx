@@ -1,17 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import { decodeRouteIdentifier } from "@/lib/route-identifier";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { ArrowLeft, FileClock, History, Pencil, Plus, ReceiptText, Repeat, Shield } from "lucide-react";
+import { ArrowLeft, ChevronDown, Pencil, Plus } from "lucide-react";
 import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
-import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { getActivityForEntity } from "@/lib/activity-log";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
@@ -39,6 +38,21 @@ const frequencyLabels: Record<string, string> = {
   SINGLE: "Única",
   OTHER: "Otra",
 };
+
+function PolicyDisclosure({ title, summary, children }: { title: string; summary: string; children: ReactNode }) {
+  return (
+    <details className="group overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0">
+          <span className="block font-semibold text-foreground">{title}</span>
+          <span className="mt-1 block truncate text-sm text-muted-foreground">{summary}</span>
+        </span>
+        <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-border/70">{children}</div>
+    </details>
+  );
+}
 
 export default async function PolicyDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const routeParams = await params;
@@ -98,14 +112,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
 
   const [
     receipts,
-    baseReceiptCount,
-    basePendingCount,
-    basePendingAmountAgg,
-    endorsementReceiptCount,
-    endorsementPendingCount,
-    endorsementPendingAmountAgg,
     payments,
-    commissions,
     workItems,
     documents,
     endorsements,
@@ -128,58 +135,10 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
         { id: "asc" },
       ],
     }),
-    db.receipt.count({
-      where: {
-        policyId: id, organizationId: scope.organizationId,
-        endorsementId: null,
-      },
-    }),
-    db.receipt.count({
-      where: {
-        policyId: id, organizationId: scope.organizationId,
-        endorsementId: null,
-        status: { notIn: ["PAID", "CANCELLED"] },
-      },
-    }),
-    db.receipt.aggregate({
-      where: {
-        policyId: id, organizationId: scope.organizationId,
-        endorsementId: null,
-        status: { notIn: ["PAID", "CANCELLED"] },
-      },
-      _sum: { amount: true },
-    }),
-    db.receipt.count({
-      where: {
-        policyId: id, organizationId: scope.organizationId,
-        endorsementId: { not: null },
-      },
-    }),
-    db.receipt.count({
-      where: {
-        policyId: id, organizationId: scope.organizationId,
-        endorsementId: { not: null },
-        status: { notIn: ["PAID", "CANCELLED"] },
-      },
-    }),
-    db.receipt.aggregate({
-      where: {
-        policyId: id, organizationId: scope.organizationId,
-        endorsementId: { not: null },
-        status: { notIn: ["PAID", "CANCELLED"] },
-      },
-      _sum: { amount: true },
-    }),
     db.payment.findMany({
       where: { policyId: id, organizationId: scope.organizationId, status: "POSTED" },
       include: { client: true },
       orderBy: [{ paidDate: "desc" }, { id: "desc" }],
-      take: 10,
-    }),
-    db.commission.findMany({
-      where: { policyId: id, organizationId: scope.organizationId },
-      include: { client: true, insurer: true, receipt: true },
-      orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
       take: 10,
     }),
     getWorkItems({
@@ -242,26 +201,28 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
   const activeEndorsements = endorsements.filter((endorsement) => endorsement.status === "ACTIVE");
   const expiredEndorsements = endorsements.filter((endorsement) => endorsement.status === "EXPIRED");
   const cancelledEndorsements = endorsements.filter((endorsement) => endorsement.status === "CANCELLED");
-  const basePendingAmount = toNumber(basePendingAmountAgg._sum.amount);
-  const endorsementPendingAmount = toNumber(endorsementPendingAmountAgg._sum.amount);
-  const openCommissions = commissions.filter((commission) => commission.status !== "PAID" && commission.status !== "CANCELLED");
   const openWorkItemCount = await countWorkItems({
     workItemTypes: ["TASK"],
     statuses: OPEN_WORK_ITEM_STATUSES,
     policyId: id,
     organizationId: scope.organizationId,
   }, db);
-  const paymentsTotal = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+  const activeBaseReceipts = receipts.filter((receipt) => receipt.status !== "CANCELLED");
+  const basePendingCount = activeBaseReceipts.filter((receipt) => receipt.status !== "PAID").length;
+  const paidBaseReceiptCount = activeBaseReceipts.filter((receipt) => receipt.status === "PAID").length;
+  const riskDetailEntries = getPolicyRiskDetailEntries(policy.riskDetails);
+  const renewalDays = daysUntil(policy.endDate);
   return (
     <div className="flex flex-col gap-6">
       <RecordPageView id={policy.id} label={`${policy.policyNumber} · ${policy.client.fullName}`} href={`/policies/${policy.id}`} type="Póliza" />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
-          eyebrow="CRM"
+          eyebrow={`CRM · ${policyTypeLabel(policy.policyType)}`}
           title={policy.policyNumber}
-          description={`${policy.client.fullName} · ${policy.insurer.name} · ${policyTypeLabel(policy.policyType)}`}
+          description={`${policy.client.fullName} · ${policy.insurer.name}`}
           actions={
             <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
+              <StatusBadge status={policy.status} />
               <NoraContextButton context={{ type: "policy", id: policy.id }} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/policies/${id}/edit`}>
@@ -280,511 +241,305 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
           }
         />
 
-        <AuditByline createdById={policy.createdById} updatedById={policy.updatedById} />
-
-        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
-          <MetricCard
-            title="Prima"
-            value={formatCurrency(policy.premiumAmount, policy.currency)}
-            description={premiumReconciliation.status === "REVIEW" ? (
-              <>
-                Requiere revisión · diferencia {formatCurrency(premiumReconciliation.difference, policy.currency)}
-                {isAdmin ? <span> · <Link className="font-medium text-primary hover:underline" href={`/data-quality?tab=revisiones&q=${encodeURIComponent(policy.policyNumber)}`}>Ver en Revisiones</Link></span> : null}
-              </>
-            ) : frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}
-            icon={Shield}
-            tone="emerald"
-          />
-          <MetricCard
-            title="Recibos póliza"
-            value={baseReceiptCount}
-            description={`${basePendingCount} abiertos en la vigencia base.`}
-            icon={ReceiptText}
-            tone="amber"
-          />
-          <MetricCard
-            title="Recibos endosos"
-            value={endorsementReceiptCount}
-            description={`${endorsementPendingCount} abiertos en endosos.`}
-            icon={Repeat}
-            tone="blue"
-          />
-          <MetricCard
-            title="Endosos activos"
-            value={activeEndorsements.length}
-            description={`${expiredEndorsements.length} vencidos · ${cancelledEndorsements.length} cancelados`}
-            icon={Repeat}
-            tone="blue"
-          />
-          <MetricCard
-            title="Comisiones abiertas"
-            value={openCommissions.length}
-            description="Esperadas, pendientes u observadas."
-            icon={Shield}
-            tone="emerald"
-          />
-          <MetricCard
-            title="Tareas abiertas"
-            value={openWorkItemCount}
-            description={`${daysUntil(policy.endDate)} días para renovación`}
-            icon={FileClock}
-            tone="rose"
-          />
+        <section aria-label="Resumen de póliza" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Prima total de póliza</p>
+            <p className="mt-2 text-xl font-semibold tracking-tight text-foreground">{formatCurrency(policy.premiumAmount, policy.currency)}</p>
+            <p className={`mt-1 text-xs ${premiumReconciliation.status === "RECONCILED" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
+              {premiumReconciliation.status === "RECONCILED" ? "Conciliada con recibos" : `Revisar diferencia ${formatCurrency(premiumReconciliation.difference, policy.currency)}`}
+            </p>
+            {premiumReconciliation.status === "REVIEW" && isAdmin ? (
+              <Link className="mt-1 inline-block text-xs font-medium text-primary hover:underline" href={`/data-quality?tab=revisiones&q=${encodeURIComponent(policy.policyNumber)}`}>
+                Abrir revisión
+              </Link>
+            ) : null}
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vigencia</p>
+            <p className="mt-2 text-base font-semibold text-foreground">{formatDate(policy.startDate)} — {formatDate(policy.endDate)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}{policy.paymentPlan ? ` · ${policy.paymentPlan}` : ""}</p>
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recibos</p>
+            <p className="mt-2 text-xl font-semibold tracking-tight text-foreground">{activeBaseReceipts.length} vigentes</p>
+            <p className="mt-1 text-xs text-muted-foreground">{paidBaseReceiptCount} pagados · {basePendingCount} abiertos</p>
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Renovación</p>
+            <p className="mt-2 text-xl font-semibold tracking-tight text-foreground">{renewalDays >= 0 ? `${renewalDays} días` : `Venció hace ${Math.abs(renewalDays)} días`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{formatDate(policy.endDate)}</p>
+          </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-          <SectionCard title="Póliza base" description="Contexto operativo y comercial de la vigencia base.">
-            <div className="grid gap-4 p-4 text-sm">
-              <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={policy.status} />
-                <Badge variant="outline" className="rounded-full">
-                  {policyTypeLabel(policy.policyType)}
-                </Badge>
+        <section aria-labelledby="insured-risk-heading" className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 id="insured-risk-heading" className="text-lg font-semibold text-foreground">Riesgo asegurado</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Objeto, personas y características principales del riesgo.</p>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Objeto asegurado</p>
+                <p className="mt-2 break-words text-lg font-semibold text-foreground">
+                  {policy.insuredObject?.trim() || policy.insuredAssets[0]?.description || policy.insuredParties[0]?.fullName || "Pendiente de capturar"}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">{policy.client.fullName} · {policy.insurer.name} · {policyTypeLabel(policy.policyType)}</p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo póliza</p>
-                  <p className="mt-1 text-lg font-semibold">{formatCurrency(basePendingAmount, policy.currency)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{basePendingCount} recibo(s) abiertos</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo endosos</p>
-                  <p className="mt-1 text-lg font-semibold">{formatCurrency(endorsementPendingAmount, policy.currency)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{endorsementPendingCount} recibo(s) abiertos</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Endosos vigentes</p>
-                  <p className="mt-1 text-lg font-semibold">{activeEndorsements.length}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{expiredEndorsements.length} vencidos · {cancelledEndorsements.length} cancelados</p>
-                </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {policy.insuredAssets.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-muted-foreground">{policy.insuredAssets.length} {policy.insuredAssets.length === 1 ? "activo" : "activos"}</span> : null}
+                {policy.insuredParties.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-muted-foreground">{policy.insuredParties.length} {policy.insuredParties.length === 1 ? "persona asegurada" : "personas aseguradas"}</span> : null}
               </div>
-              <SectionCard title="Relaciones">
-                <div className="space-y-3 px-4 py-3 text-sm">
-                  <div>
-                    <p className="font-medium text-foreground">Cliente</p>
-                    <Link href={`/clients/${policy.clientId}`} className="mt-1 block text-foreground hover:text-primary">
-                      {policy.client.fullName}
-                    </Link>
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Aseguradora</p>
-                    <p className="mt-1">{policy.insurer.name}</p>
-                  </div>
-                </div>
-              </SectionCard>
-              <div className="grid gap-3 sm:grid-cols-2">
+            </div>
+
+            <div className="mt-5 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-xs text-muted-foreground">Plan de pago</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{policy.paymentPlan?.trim() || "Sin capturar"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Frecuencia</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}</p>
+              </div>
+              {policy.beneficiaryInfo ? (
                 <div>
-                  <p className="text-muted-foreground">Inicio</p>
-                  <p className="font-medium">{formatDate(policy.startDate)}</p>
+                  <p className="text-xs text-muted-foreground">Beneficiarios</p>
+                  <p className="mt-1 break-words text-sm font-medium text-foreground">{policy.beneficiaryInfo}</p>
                 </div>
+              ) : null}
+              {policy.commissionRateOverride !== null ? (
                 <div>
-                  <p className="text-muted-foreground">Fin</p>
-                  <p className="font-medium">{formatDate(policy.endDate)}</p>
+                  <p className="text-xs text-muted-foreground">Tasa específica de comisión</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{Number(policy.commissionRateOverride).toFixed(2)}%</p>
                 </div>
-                <div>
-                  <p className="text-muted-foreground">Renovación</p>
-                  <p className="font-medium">{formatDate(policy.endDate)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Frecuencia</p>
-                  <p className="font-medium">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Tasa de comisión</p>
-                  <p className="font-medium">{policy.commissionRateOverride === null ? "Regla general de aseguradora" : `${Number(policy.commissionRateOverride).toFixed(2)}% · específica de póliza`}</p>
-                </div>
-                {previousPolicy ? (
-                  <div>
-                    <p className="text-muted-foreground">Renueva de</p>
-                    <Link href={`/policies/${previousPolicy.id}`} className="font-medium text-foreground hover:text-primary">
-                      {previousPolicy.policyNumber}
-                    </Link>
-                  </div>
-                ) : null}
-                {policy.renewals.length ? (
-                  <div>
-                    <p className="text-muted-foreground">Renueva a</p>
-                    <div className="mt-1 space-y-1">
-                      {policy.renewals.map((renewal) => (
-                        <Link
-                          key={renewal.id}
-                          href={`/policies/${renewal.id}`}
-                          className="block font-medium text-foreground hover:text-primary"
-                        >
-                          {renewal.policyNumber}
-                        </Link>
+              ) : null}
+            </div>
+
+            {policy.riskDetailsReviewRequired ? (
+              <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                La descripción histórica requiere revisión manual. Se conserva el texto original.
+              </p>
+            ) : null}
+
+            {(riskDetailEntries.length > 0 || policy.insuredAssets.length > 0 || policy.insuredParties.length > 0 || policy.notes) ? (
+              <details className="group mt-4 rounded-xl border border-border/70 bg-muted/20">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-medium marker:content-none [&::-webkit-details-marker]:hidden">
+                  <span>Ver datos completos del riesgo y notas</span>
+                  <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="space-y-4 border-t border-border/70 p-3">
+                  {riskDetailEntries.length ? (
+                    <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                      {riskDetailEntries.map((entry) => (
+                        <div key={`${entry.label}-${entry.value}`}>
+                          <p className="text-xs text-muted-foreground">{entry.label}</p>
+                          <p className="mt-1 break-words text-sm font-medium text-foreground">{entry.value}</p>
+                        </div>
                       ))}
                     </div>
-                  </div>
-                ) : null}
-              </div>
-              <SectionCard title="Detalle comercial">
-                <div className="space-y-3 px-4 py-3 text-sm text-muted-foreground">
-                  <div>
-                    <p className="font-medium text-foreground">Objeto asegurado</p>
-                    <p className="mt-1">{policy.insuredObject ?? "Sin capturar"}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Plan de pago</p>
-                    <p className="mt-1">{policy.paymentPlan ?? "Sin capturar"}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Beneficiarios</p>
-                    <p className="mt-1">{policy.beneficiaryInfo ?? "Sin capturar"}</p>
-                  </div>
-                </div>
-              </SectionCard>
-              {getPolicyRiskDetailEntries(policy.riskDetails).length || policy.riskDetailsReviewRequired ? (
-                <SectionCard title="Datos específicos del riesgo">
-                  <div className="space-y-3 px-4 py-3 text-sm">
-                    {policy.riskDetailsReviewRequired ? <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">La descripción histórica requiere revisión manual. Se conserva el texto original.</p> : null}
-                    {getPolicyRiskDetailEntries(policy.riskDetails).map((entry) => (
-                      <div key={`${entry.label}-${entry.value}`} className="grid gap-1 sm:grid-cols-[minmax(10rem,0.7fr)_1fr]">
-                        <p className="text-muted-foreground">{entry.label}</p>
-                        <p className="break-words font-medium text-foreground">{entry.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                </SectionCard>
-              ) : null}
-              <SectionCard title="Asegurados y activos">
-                <div className="space-y-4 px-4 py-3 text-sm">
-                  <div>
-                    <p className="font-medium text-foreground">Personas aseguradas</p>
-                    {policy.insuredParties.length ? (
-                      <ul className="mt-2 space-y-2 text-muted-foreground">
+                  ) : null}
+                  {policy.insuredParties.length ? (
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">Personas aseguradas</h3>
+                      <ul className="mt-2 divide-y divide-border/70">
                         {policy.insuredParties.map((party) => (
-                          <li key={party.id} className="flex items-center justify-between gap-3">
+                          <li key={party.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm">
                             <span>{party.fullName}</span>
-                            <span className="text-xs uppercase tracking-wide">{party.isPrimary ? "Principal" : "Secundario"}</span>
+                            <span className="text-xs uppercase tracking-wide text-muted-foreground">{party.isPrimary ? "Principal" : "Secundario"}</span>
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <p className="mt-1 text-muted-foreground">Sin personas aseguradas registradas.</p>
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Activos asegurados</p>
-                    {policy.insuredAssets.length ? (
-                      <ul className="mt-2 space-y-2 text-muted-foreground">
+                    </div>
+                  ) : null}
+                  {policy.insuredAssets.length > 1 ? (
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">Activos asegurados</h3>
+                      <ul className="mt-2 divide-y divide-border/70">
                         {policy.insuredAssets.map((asset) => (
-                          <li key={asset.id} className="flex flex-col gap-1 rounded-2xl border border-border/60 bg-muted/20 p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <span>{asset.assetType}</span>
-                              <span className="text-xs uppercase tracking-wide">{asset.isPrimary ? "Principal" : "Secundario"}</span>
-                            </div>
-                            <span>{asset.description}</span>
-                            {asset.serialNumber ? <span className="text-xs text-muted-foreground">Serie: {asset.serialNumber}</span> : null}
+                          <li key={asset.id} className="flex flex-col gap-1 py-2 text-sm">
+                            <span className="font-medium">{asset.description}</span>
+                            <span className="text-xs text-muted-foreground">{asset.assetType}{asset.serialNumber ? ` · Serie ${asset.serialNumber}` : ""}</span>
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <p className="mt-1 text-muted-foreground">Sin activos asegurados registrados.</p>
-                    )}
-                  </div>
+                    </div>
+                  ) : policy.insuredAssets[0]?.serialNumber ? (
+                    <p className="text-sm text-muted-foreground">Serie: <span className="font-medium text-foreground">{policy.insuredAssets[0].serialNumber}</span></p>
+                  ) : null}
+                  {policy.notes ? <div><h3 className="text-sm font-semibold text-foreground">Notas</h3><p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{policy.notes}</p></div> : null}
                 </div>
-              </SectionCard>
-              {policy.notes ? <p className="text-sm text-muted-foreground">{policy.notes}</p> : null}
-            </div>
-          </SectionCard>
+              </details>
+            ) : null}
+          </div>
+        </section>
 
-          <SectionCard
-            title="Recibos de la póliza"
-            description="Calendario de cobro derivado solo de la vigencia base."
-            action={
-              <Button asChild size="sm" className="rounded-full">
-                <Link href={`/receipts/new?policyId=${id}`}>
-                  <Plus className="mr-2 size-4" />
-                  Nuevo recibo de póliza
-                </Link>
-              </Button>
-            }
-          >
-            <PolicyReceiptsTable receipts={policyReceiptRows} />
-          </SectionCard>
-
-          <SectionCard
-            title="Endosos"
-            description="Ajustes ligados a esta póliza base, cada uno con sus propios recibos y documentos."
-            action={
-              <Button asChild size="sm" className="rounded-full">
-                <Link href={`/policies/${id}/endorsements/new`}>
-                  <Plus className="mr-2 size-4" />
-                  Nuevo endoso
-                </Link>
-              </Button>
-            }
-          >
-            {endorsements.length === 0 ? (
-              <div className="p-4">
-                <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
-                  <ReceiptText className="mx-auto mb-2 size-5 text-muted-foreground" />
-                  Todavía no hay endosos para esta póliza.
+        <section aria-labelledby="related-policy-heading" className="space-y-3">
+          <div>
+            <h2 id="related-policy-heading" className="text-lg font-semibold text-foreground">Información relacionada</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Abre un apartado para consultar su detalle.</p>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-2">
+            <PolicyDisclosure title="Recibos y pagos" summary={`${activeBaseReceipts.length} recibos vigentes · ${basePendingCount} abiertos · ${payments.length} pagos recientes`}>
+              <div className="space-y-5 p-4">
+                <div>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground">Recibos de la vigencia base</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">Prima total de póliza: {formatCurrency(policy.premiumAmount, policy.currency)}</p>
+                    </div>
+                    <Button asChild size="sm" className="rounded-full">
+                      <Link href={`/receipts/new?policyId=${id}`}><Plus className="mr-2 size-4" />Nuevo recibo</Link>
+                    </Button>
+                  </div>
+                  <PolicyReceiptsTable receipts={policyReceiptRows} />
+                </div>
+                <div className="border-t border-border/70 pt-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="font-semibold text-foreground">Pagos recientes</h3>
+                    <Link href={`/receipts?tab=historico&q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver historial completo</Link>
+                  </div>
+                  {payments.length ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader><TableRow className="bg-muted/40"><TableHead>Fecha</TableHead><TableHead>Cliente</TableHead><TableHead>Referencia</TableHead><TableHead className="text-right">Monto</TableHead></TableRow></TableHeader>
+                        <TableBody>{payments.map((payment) => (
+                          <TableRow key={payment.id}>
+                            <TableCell>{formatDate(payment.paidDate)}</TableCell>
+                            <TableCell>{payment.client.fullName}</TableCell>
+                            <TableCell className="font-mono text-xs">{payment.reference ?? "Sin referencia"}</TableCell>
+                            <TableCell className="text-right font-medium">{formatCurrency(payment.amount, payment.currency)}</TableCell>
+                          </TableRow>
+                        ))}</TableBody>
+                      </Table>
+                    </div>
+                  ) : <p className="text-sm text-muted-foreground">Todavía no hay pagos registrados.</p>}
                 </div>
               </div>
-            ) : (
+            </PolicyDisclosure>
+
+            <PolicyDisclosure title="Endosos" summary={`${activeEndorsements.length} activos · ${expiredEndorsements.length} vencidos · ${cancelledEndorsements.length} cancelados`}>
               <div className="space-y-4 p-4">
-                {endorsements.map((endorsement) => {
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">Ajustes ligados a esta póliza base, con sus propios recibos y documentos.</p>
+                  <Button asChild size="sm" className="rounded-full"><Link href={`/policies/${id}/endorsements/new`}><Plus className="mr-2 size-4" />Nuevo endoso</Link></Button>
+                </div>
+                {endorsements.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">Todavía no hay endosos para esta póliza.</p>
+                ) : endorsements.map((endorsement) => {
                   const endorsementReconciliation = reconcileEndorsementReceiptPremium(Number(endorsement.amount), endorsement.receipts.map((receipt) => ({ amount: toNumber(receipt.amount), status: receipt.status })));
                   return (
-                  <div key={endorsement.id} className="rounded-3xl border border-border/70 bg-card p-4 shadow-sm">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={`/policies/${id}/endorsements/${endorsement.id}/edit`}
-                            className="text-lg font-semibold text-foreground hover:text-primary"
-                          >
-                            Endoso {endorsement.endorsementNumber}
-                          </Link>
-                          <StatusBadge status={endorsement.status} />
+                    <article key={endorsement.id} className="space-y-4 rounded-xl border border-border/70 p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link href={`/policies/${id}/endorsements/${endorsement.id}/edit`} className="font-semibold text-foreground hover:text-primary">Endoso {endorsement.endorsementNumber}</Link>
+                            <StatusBadge status={endorsement.status} />
+                          </div>
+                          <p className="text-sm text-muted-foreground">{formatDate(endorsement.startDate)} · {formatDate(endorsement.endDate)} · {formatCurrency(endorsement.amount, endorsement.currency)}</p>
+                          <p className={`text-xs ${endorsementReconciliation.status === "RECONCILED" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
+                            Recibos {endorsementReconciliation.status === "RECONCILED" ? "conciliados" : "requieren revisión"}: {formatCurrency(endorsementReconciliation.receiptTotal, endorsement.currency)} · diferencia {formatCurrency(endorsementReconciliation.difference, endorsement.currency)}.
+                          </p>
+                          {endorsement.reference ? <p className="text-xs text-muted-foreground">Referencia: {endorsement.reference}</p> : null}
+                          {endorsement.concept ? <p className="text-xs text-muted-foreground">Concepto: {endorsement.concept}</p> : null}
+                          {endorsement.notes ? <p className="text-xs text-muted-foreground">{endorsement.notes}</p> : null}
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          {formatDate(endorsement.startDate)} · {formatDate(endorsement.endDate)} ·{" "}
-                          {formatCurrency(endorsement.amount, endorsement.currency)}
-                        </p>
-                        <p className={`text-xs ${endorsementReconciliation.status === "RECONCILED" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
-                          Recibos {endorsementReconciliation.status === "RECONCILED" ? "conciliados" : "requieren revisión"}: {formatCurrency(endorsementReconciliation.receiptTotal, endorsement.currency)} · diferencia {formatCurrency(endorsementReconciliation.difference, endorsement.currency)}.
-                        </p>
-                        {endorsement.reference ? (
-                          <p className="text-xs text-muted-foreground">Referencia: {endorsement.reference}</p>
-                        ) : null}
-                        {endorsement.concept ? (
-                          <p className="text-xs text-muted-foreground">Concepto: {endorsement.concept}</p>
-                        ) : null}
-                        {endorsement.notes ? <p className="text-xs text-muted-foreground">{endorsement.notes}</p> : null}
+                        <Button asChild variant="outline" size="sm" className="rounded-full bg-card/70"><Link href={`/policies/${id}/endorsements/${endorsement.id}/edit`}>Editar</Link></Button>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button asChild variant="outline" size="sm" className="rounded-full bg-card/70">
-                          <Link href={`/policies/${id}/endorsements/${endorsement.id}/edit`}>Editar</Link>
-                        </Button>
-                        <Button asChild size="sm" className="rounded-full">
-                          <Link href={`/receipts/new?policyId=${id}&endorsementId=${endorsement.id}`}>Nuevo recibo de endoso</Link>
-                        </Button>
+                      <div className="space-y-3 border-t border-border/70 pt-3">
+                        <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-medium">Recibos del endoso</h4><span className="text-xs text-muted-foreground">{endorsement.receipts.length} recibo(s)</span></div>
+                        {endorsement.receipts.length ? <PolicyReceiptsTable receipts={endorsement.receipts.map((receipt, index) => ({
+                          id: receipt.id,
+                          receiptNumber: receipt.receiptNumber,
+                          displayLabel: String(index + 1),
+                          secondaryLabel: `Folio ${receipt.receiptNumber}`,
+                          originLabel: getReceiptOriginLabel(receipt),
+                          dueDate: receipt.dueDate.toISOString().slice(0, 10),
+                          status: receipt.status,
+                          amount: Number(receipt.amount),
+                          currency: receipt.currency,
+                        }))} /> : <p className="text-sm text-muted-foreground">Este endoso todavía no tiene recibos asociados.</p>}
+                        <Button asChild size="sm" variant="outline" className="rounded-full"><Link href={`/receipts/new?policyId=${id}&endorsementId=${endorsement.id}`}><Plus className="mr-2 size-4" />Nuevo recibo de endoso</Link></Button>
                       </div>
-                    </div>
-
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium text-foreground">Recibos del endoso</p>
-                        <span className="text-xs text-muted-foreground">{endorsement.receipts.length} recibo(s)</span>
-                      </div>
-                      {endorsement.receipts.length > 0 ? (
-                        <PolicyReceiptsTable
-                          receipts={endorsement.receipts.map((receipt, index) => ({
-                            id: receipt.id,
-                            receiptNumber: receipt.receiptNumber,
-                            displayLabel: String(index + 1),
-                            secondaryLabel: `Folio ${receipt.receiptNumber}`,
-                            originLabel: getReceiptOriginLabel(receipt),
-                            dueDate: receipt.dueDate.toISOString().slice(0, 10),
-                            status: receipt.status,
-                            amount: Number(receipt.amount),
-                            currency: receipt.currency,
-                          }))}
-                        />
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
-                          Este endoso todavía no tiene recibos asociados.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium text-foreground">Documentos del endoso</p>
-                        <span className="text-xs text-muted-foreground">{endorsement.documents.length} archivo(s)</span>
-                      </div>
-                      <DocumentDropZone
-                        associations={{ policyId: id, clientId: policy.clientId, endorsementId: endorsement.id }}
-                        defaultDocumentType="ENDORSEMENT"
-                        title="Subir documentos del endoso"
-                        description="Adjunta el aviso de pago, PDF o soporte de este endoso."
-                      />
-                      <DocumentList
-                        showAssociation
-                        documents={endorsement.documents.map((doc) => ({
+                      <div className="space-y-3 border-t border-border/70 pt-3">
+                        <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-medium">Documentos del endoso</h4><span className="text-xs text-muted-foreground">{endorsement.documents.length} archivo(s)</span></div>
+                        <DocumentDropZone associations={{ policyId: id, clientId: policy.clientId, endorsementId: endorsement.id }} defaultDocumentType="ENDORSEMENT" title="Subir documentos del endoso" description="Adjunta el aviso de pago, PDF o soporte de este endoso." />
+                        <DocumentList showAssociation documents={endorsement.documents.map((doc) => ({
                           id: doc.id,
                           fileName: doc.fileName,
                           documentType: doc.documentType,
                           mimeType: doc.mimeType,
                           uploadedAt: doc.uploadedAt,
-                          associationLabel:
-                            doc.receipt?.receiptNumber ??
-                            doc.endorsement?.endorsementNumber ??
-                            "Endoso",
-                        }))}
-                      />
-                    </div>
-                  </div>
+                          associationLabel: doc.receipt?.receiptNumber ?? doc.endorsement?.endorsementNumber ?? "Endoso",
+                        }))} />
+                      </div>
+                    </article>
                   );
                 })}
               </div>
-            )}
-          </SectionCard>
-        </section>
+            </PolicyDisclosure>
 
-        {family && family.policies.length > 1 ? (
-          <SectionCard
-            title="Historial de vigencias"
-            description={`Esta familia tiene ${family.policies.length} vigencias registradas. La póliza actual muestra solo su periodo propio.`}
-          >
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Vigencia</TableHead>
-                  <TableHead>Periodo</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Prima</TableHead>
-                  <TableHead className="text-right">Recibos</TableHead>
-                  <TableHead className="text-right">Pagos</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {family.policies.map((term: (typeof family.policies)[number]) => (
-                  <TableRow key={term.id} className={term.id === policy.id ? "bg-muted/25" : undefined}>
-                    <TableCell>
-                      <Link href={`/policies/${term.id}`} className="font-medium text-foreground hover:text-primary">
-                        {term.policyNumber}
-                      </Link>
-                      {term.id === policy.id ? (
-                        <p className="text-xs text-muted-foreground">Vigencia actual</p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">Histórica</p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {formatDate(term.startDate)} · {formatDate(term.endDate)}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={term.status} />
-                    </TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(term.premiumAmount, term.currency)}</TableCell>
-                    <TableCell className="text-right">{term._count.receipts}</TableCell>
-                    <TableCell className="text-right">{term._count.payments}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </SectionCard>
-        ) : null}
-
-        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <SectionCard title="Pagos" description="Últimos 10 pagos; el acumulado refleja toda la póliza." action={<Link href={`/receipts?tab=historico&q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver historial</Link>}>
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Referencia</TableHead>
-                  <TableHead className="text-right">Monto</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {payments.map((payment) => (
-                  <TableRow key={payment.id}>
-                    <TableCell>{formatDate(payment.paidDate)}</TableCell>
-                    <TableCell>{payment.client.fullName}</TableCell>
-                    <TableCell className="font-mono text-xs">{payment.reference ?? "Sin referencia"}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(payment.amount, payment.currency)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="border-t border-border/70 px-4 py-3 text-sm text-muted-foreground">
-              Pagos acumulados: <span className="font-medium text-foreground">{formatCurrency(paymentsTotal, policy.currency)}</span>
-            </div>
-          </SectionCard>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <SectionCard title="Comisiones" description="Últimas 10 comisiones; el enlace abre la cola completa." action={<Link href={`/commissions?q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver todas</Link>}>
-              <div className="divide-y divide-stone-200/80">
-                {commissions.map((commission) => (
-                  <div key={commission.id} className="px-4 py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-foreground">{formatCurrency(commission.expectedAmount, policy.currency)}</p>
-                      <StatusBadge status={commission.status} />
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {commission.expectedDate ? formatDate(commission.expectedDate) : "Sin fecha"} · {commission.insurer.name}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">{commission.receipt?.receiptNumber ?? "Sin recibo asociado"}</p>
-                  </div>
-                ))}
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Tareas" description="Últimos 10 pendientes; el enlace abre la cola completa." action={<Link href={`/operations?view=pending&q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver todas</Link>}>
-              <div className="divide-y divide-stone-200/80">
-                {workItems.map((task) => (
-                  <div key={task.id} className="px-4 py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <Link href={`/tasks/${task.sourceId ?? task.id}`} className="font-medium text-foreground hover:text-primary">
-                        {task.folio ?? task.sourceId ?? task.id}
-                      </Link>
-                      <div className="flex gap-2">
-                        <PriorityBadge priority={task.priority} />
-                        <StatusBadge status={task.status} />
-                      </div>
+            <PolicyDisclosure title="Tareas abiertas" summary={`${openWorkItemCount} abiertas · ${workItems.length} recientes`}>
+              <div className="p-4">
+                {workItems.length ? <div className="divide-y divide-border/70">{workItems.map((task) => (
+                  <div key={task.id} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Link href={`/tasks/${task.sourceId ?? task.id}`} className="font-medium text-foreground hover:text-primary">{task.folio ?? task.sourceId ?? task.id}</Link>
+                      <div className="flex gap-2"><PriorityBadge priority={task.priority} /><StatusBadge status={task.status} /></div>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{task.title}</p>
                     <p className="mt-1 text-xs text-muted-foreground">{task.dueDate ? formatDate(task.dueDate) : "Sin fecha"}</p>
                   </div>
-                ))}
+                ))}</div> : <p className="text-sm text-muted-foreground">No hay tareas abiertas asociadas a esta póliza.</p>}
+                <Link href={`/operations?view=pending&q=${encodeURIComponent(policy.policyNumber)}`} className="mt-4 inline-block text-sm font-medium text-primary hover:underline">Ver tareas en Operación</Link>
               </div>
-            </SectionCard>
+            </PolicyDisclosure>
+
+            <PolicyDisclosure title="Documentos" summary={`${documents.length} archivos recientes asociados`}>
+              <div className="space-y-4 p-4">
+                <DocumentDropZone associations={{ policyId: id, clientId: policy.clientId }} defaultDocumentType="POLICY" />
+                <DocumentList showAssociation documents={documents.map((document) => ({
+                  id: document.id,
+                  fileName: document.fileName,
+                  documentType: document.documentType,
+                  mimeType: document.mimeType,
+                  uploadedAt: document.uploadedAt,
+                  previewAvailable: document.filePath.startsWith(`demo://${scope.organizationId}/`),
+                  associationLabel: document.receipt?.receiptNumber ?? document.task?.folio ?? document.claim?.folio ?? "Póliza",
+                }))} />
+                <Link href={`/documents?q=${encodeURIComponent(policy.policyNumber)}`} className="inline-block text-sm font-medium text-primary hover:underline">Ver archivo completo</Link>
+              </div>
+            </PolicyDisclosure>
+
+            <PolicyDisclosure title="Actividad e historial" summary={`${activity.length} eventos recientes · cambios de la póliza`}>
+              <div className="space-y-4 p-4">
+                <AuditByline createdById={policy.createdById} updatedById={policy.updatedById} />
+                {activity.length ? <ActivityTimeline entries={activity} /> : <p className="text-sm text-muted-foreground">Sin actividad registrada para esta póliza todavía.</p>}
+                <Link href={`/activity?entity=Policy&id=${id}`} className="inline-block text-sm font-medium text-primary hover:underline">Ver todo el historial</Link>
+              </div>
+            </PolicyDisclosure>
+
+            {family && family.policies.length > 1 ? (
+              <PolicyDisclosure title="Historial de vigencias" summary={`${family.policies.length} vigencias registradas`}>
+                <div className="overflow-x-auto p-4">
+                  <Table>
+                    <TableHeader><TableRow className="bg-muted/40"><TableHead>Vigencia</TableHead><TableHead>Periodo</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Prima</TableHead><TableHead className="text-right">Recibos</TableHead><TableHead className="text-right">Pagos</TableHead></TableRow></TableHeader>
+                    <TableBody>{family.policies.map((term: (typeof family.policies)[number]) => (
+                      <TableRow key={term.id} className={term.id === policy.id ? "bg-muted/25" : undefined}>
+                        <TableCell><Link href={`/policies/${term.id}`} className="font-medium text-foreground hover:text-primary">{term.policyNumber}</Link><p className="text-xs text-muted-foreground">{term.id === policy.id ? "Vigencia actual" : "Histórica"}</p></TableCell>
+                        <TableCell>{formatDate(term.startDate)} · {formatDate(term.endDate)}</TableCell>
+                        <TableCell><StatusBadge status={term.status} /></TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(term.premiumAmount, term.currency)}</TableCell>
+                        <TableCell className="text-right">{term._count.receipts}</TableCell>
+                        <TableCell className="text-right">{term._count.payments}</TableCell>
+                      </TableRow>
+                    ))}</TableBody>
+                  </Table>
+                </div>
+              </PolicyDisclosure>
+            ) : null}
           </div>
         </section>
-
-        <SectionCard title="Documentos" description="Últimos 10 documentos; el enlace abre el archivo completo." action={<Link href={`/documents?q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver todos</Link>}>
-          <div className="space-y-4 p-4">
-            <DocumentDropZone
-              associations={{ policyId: id, clientId: policy.clientId }}
-              defaultDocumentType="POLICY"
-            />
-            <DocumentList
-              showAssociation
-              documents={documents.map((d) => ({
-                id: d.id,
-                fileName: d.fileName,
-                documentType: d.documentType,
-                mimeType: d.mimeType,
-                uploadedAt: d.uploadedAt,
-                previewAvailable: d.filePath.startsWith(`demo://${scope.organizationId}/`),
-                associationLabel:
-                  d.receipt?.receiptNumber ??
-                  d.task?.folio ??
-                  d.claim?.folio ??
-                  "Póliza",
-              }))}
-            />
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="Actividad"
-          description="Cambios y eventos recientes registrados para esta póliza."
-          action={
-            <Link
-              href={`/activity?entity=Policy&id=${id}`}
-              className="text-sm font-medium text-primary hover:underline"
-            >
-              Ver todo el historial
-            </Link>
-          }
-        >
-          {activity.length === 0 ? (
-            <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
-                <History className="mx-auto mb-2 size-5 text-muted-foreground" />
-                Sin actividad registrada para esta póliza todavía.
-              </div>
-            </div>
-          ) : (
-            <ActivityTimeline entries={activity} />
-          )}
-        </SectionCard>
 
         {previousPolicy && renewalComparison ? (
           <PolicyRenewalComparison
