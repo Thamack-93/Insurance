@@ -26,6 +26,7 @@ function logQualitasReceiptProviderEvent(event: QualitasProviderEvent) {
       hasPolicyForm: event.hasPolicyForm,
       policyFormMethod: event.policyFormMethod,
       policyActionAllowed: event.policyActionAllowed,
+      hasPolicyComponent: event.hasPolicyComponent,
       receiptLookupOutcome: event.receiptLookupOutcome,
       receiptLookupReason: event.receiptLookupReason,
       outcome: event.outcome,

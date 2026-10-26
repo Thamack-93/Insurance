@@ -106,6 +106,7 @@ export type QualitasProviderEvent = {
   policyFormMethod?: "GET" | "POST" | "OTHER" | "MISSING";
   policyActionAllowed?: boolean;
   formCount?: number;
+  hasPolicyComponent?: boolean;
   receiptLookupOutcome?: QualitasReceiptLookupResult["outcome"];
   receiptLookupReason?: QualitasReceiptLookupReason;
   hasContactForm?: boolean;
@@ -427,6 +428,7 @@ function policyFormDiagnostics(html: string, baseUrl: string) {
     policyFormMethod,
     policyActionAllowed: action ? isAllowedQualitasUrl(action) : false,
     formCount: forms.length,
+    hasPolicyComponent: Boolean(portlet),
   };
 }
 
@@ -513,17 +515,19 @@ function collectFormFieldsFromRoot(
 
 function findQualitasPolicyPortlet(html: string) {
   const document = parse(html);
-  let result: DefaultTreeAdapterTypes.Element | null = null;
+  const matches = new Map<string, DefaultTreeAdapterTypes.Element>();
   function visit(node: DefaultTreeAdapterTypes.Node) {
-    if (result) return;
-    if ("tagName" in node && elementAttribute(node as DefaultTreeAdapterTypes.Element, "id") === "p_p_id_pagopoliza_WAR_PagoPolizaportlet_") {
-      result = node as DefaultTreeAdapterTypes.Element;
-      return;
+    if ("tagName" in node) {
+      const element = node as DefaultTreeAdapterTypes.Element;
+      const id = elementAttribute(element, "id");
+      if (id === "p_p_id_pagopoliza_WAR_PagoPolizaportlet_" || id === "form-consulta-poliza") {
+        matches.set(id, element);
+      }
     }
     if ("childNodes" in node) for (const child of node.childNodes) visit(child);
   }
   visit(document);
-  return result;
+  return matches.get("p_p_id_pagopoliza_WAR_PagoPolizaportlet_") ?? matches.get("form-consulta-poliza") ?? null;
 }
 
 function collectQualitasPolicyLookupFields(root: DefaultTreeAdapterTypes.Node) {
@@ -531,7 +535,8 @@ function collectQualitasPolicyLookupFields(root: DefaultTreeAdapterTypes.Node) {
   function visit(node: DefaultTreeAdapterTypes.Node) {
     if ("tagName" in node) {
       const element = node as DefaultTreeAdapterTypes.Element;
-      const name = elementAttribute(element, "name");
+      const id = elementAttribute(element, "id");
+      const name = elementAttribute(element, "name") ?? (id === "numPoliza" ? id : null);
       const type = (elementAttribute(element, "type") ?? "text").toLowerCase();
       if (
         element.tagName.toLowerCase() === "input"
