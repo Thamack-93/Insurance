@@ -290,7 +290,7 @@ export function PolicyForm({
                 <Input id="premiumIssuanceExpenseAmount" type="number" min="0" step="0.01" placeholder="Pendiente" {...register("premiumIssuanceExpenseAmount")} />
               </FormField>
               <FormField label="Recargo fraccionado total" htmlFor="premiumSurchargeAmount" error={errors.premiumSurchargeAmount?.message}>
-                <Input id="premiumSurchargeAmount" type="number" min="0" step="0.01" placeholder="Pendiente" {...register("premiumSurchargeAmount")} />
+                <Input id="premiumSurchargeAmount" type="number" step="0.01" placeholder="Pendiente" {...register("premiumSurchargeAmount")} />
               </FormField>
               <FormField label="Descuentos totales" htmlFor="premiumDiscountAmount" error={errors.premiumDiscountAmount?.message}>
                 <Input id="premiumDiscountAmount" type="number" min="0" step="0.01" placeholder="Pendiente" {...register("premiumDiscountAmount")} />

@@ -240,7 +240,7 @@ export function ReceiptForm({
                       <FormField label="Prima total" htmlFor={`premium-unit-${index}-total`}><Input id={`premium-unit-${index}-total`} type="number" min="0" step="0.01" {...register(`premiumBreakdownByUnit.${index}.totalPremium`)} /></FormField>
                       <FormField label="IVA" htmlFor={`premium-unit-${index}-iva`}><Input id={`premium-unit-${index}-iva`} type="number" min="0" step="0.01" {...register(`premiumBreakdownByUnit.${index}.vatAmount`)} /></FormField>
                       <FormField label="Gastos de expedición" htmlFor={`premium-unit-${index}-issue`}><Input id={`premium-unit-${index}-issue`} type="number" min="0" step="0.01" {...register(`premiumBreakdownByUnit.${index}.issuanceExpenseAmount`)} /></FormField>
-                      <FormField label="Recargo fraccionado" htmlFor={`premium-unit-${index}-surcharge`}><Input id={`premium-unit-${index}-surcharge`} type="number" min="0" step="0.01" {...register(`premiumBreakdownByUnit.${index}.surchargeAmount`)} /></FormField>
+                      <FormField label="Recargo fraccionado" htmlFor={`premium-unit-${index}-surcharge`}><Input id={`premium-unit-${index}-surcharge`} type="number" step="0.01" {...register(`premiumBreakdownByUnit.${index}.surchargeAmount`)} /></FormField>
                       <FormField label="Descuentos visibles (suma)" htmlFor={`premium-unit-${index}-discount`}><Input id={`premium-unit-${index}-discount`} type="number" min="0" step="0.01" {...register(`premiumBreakdownByUnit.${index}.discountAmount`)} /></FormField>
                     </FormGrid>
                   </div>
@@ -251,7 +251,7 @@ export function ReceiptForm({
                 <p className="text-sm text-muted-foreground">El importe del recibo es la prima total; captura solo conceptos que difieran del reparto de la póliza y estén visibles en este recibo.</p>
                 <FormField label="IVA" htmlFor="vatAmount"><Input id="vatAmount" type="number" min="0" step="0.01" {...register("vatAmount")} /></FormField>
                 <FormField label="Gastos de expedición" htmlFor="issuanceExpenseAmount"><Input id="issuanceExpenseAmount" type="number" min="0" step="0.01" {...register("issuanceExpenseAmount")} /></FormField>
-                <FormField label="Recargo fraccionado" htmlFor="surchargeAmount"><Input id="surchargeAmount" type="number" min="0" step="0.01" {...register("surchargeAmount")} /></FormField>
+                <FormField label="Recargo fraccionado" htmlFor="surchargeAmount"><Input id="surchargeAmount" type="number" step="0.01" {...register("surchargeAmount")} /></FormField>
                 <FormField label="Descuentos visibles (suma)" htmlFor="discountAmount"><Input id="discountAmount" type="number" min="0" step="0.01" {...register("discountAmount")} /></FormField>
               </FormGrid>
             )}

@@ -3,6 +3,7 @@ import {
   policySchema,
   policyUpdateSchemaForOriginalTerm,
   policyUpdateTermIsValid,
+  receiptSchema,
   type PolicyFormValues,
 } from "@/lib/validations";
 
@@ -50,5 +51,52 @@ describe("policy term validation", () => {
     const next = { startDate: "2025-10-10", endDate: "2026-10-10" };
     expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(policy(next)).success).toBe(true);
     expect(policyUpdateTermIsValid(historicalTerm, next)).toBe(true);
+  });
+});
+
+describe("financing premium validation", () => {
+  it("accepts a negative policy-level financing adjustment", () => {
+    const parsed = policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(
+      policy({ premiumSurchargeAmount: -193.18 }),
+    );
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("accepts a negative receipt financing adjustment, including per-risk breakdown", () => {
+    const parsed = receiptSchema.safeParse({
+      receiptNumber: "1",
+      policyId: "demo-policy",
+      endorsementId: "",
+      periodStartDate: "2026-10-30",
+      periodEndDate: "2027-10-30",
+      dueDate: "2026-11-13",
+      amount: 11757.31,
+      surchargeAmount: -193.18,
+      premiumBreakdownByUnit: [{
+        insuredAssetId: "demo-asset",
+        totalPremium: 11757.31,
+        vatAmount: 1621.70,
+        issuanceExpenseAmount: 670,
+        surchargeAmount: -193.18,
+        discountAmount: 0,
+      }],
+      currency: "MXN",
+      status: "PENDING",
+      paidDate: "",
+      paymentMethod: "",
+      notes: "",
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("continues to reject negative issuance expense and discount values", () => {
+    expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(
+      policy({ premiumIssuanceExpenseAmount: -1 }),
+    ).success).toBe(false);
+    expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(
+      policy({ premiumDiscountAmount: -1 }),
+    ).success).toBe(false);
   });
 });
