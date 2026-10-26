@@ -52,7 +52,7 @@ export function AppTopbar({
           ))}
         </nav>
 
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-md border bg-card px-3 py-1.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
+        <div className="mx-auto flex w-full min-w-0 max-w-2xl items-center gap-2 rounded-md border bg-card px-3 py-1.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
           {hasOrganizationContext ? <SearchInput /> : <span className="px-2 text-sm text-muted-foreground">Selecciona una organización para operar</span>}
           {hasOrganizationContext ? <button
             type="button"
