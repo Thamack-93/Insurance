@@ -4,6 +4,7 @@ import {
   calculateCommission,
   calculateCommissionEstimate,
   calculateOverdueStatus,
+  canCalculateCommissionForReceipt,
   getCommissionStatusFromReceipt,
   shouldUseAggregatePolicyOverride,
 } from "./commissions.logic";
@@ -95,6 +96,12 @@ describe("commissions.logic", () => {
   it("maps receipt status to commission status", () => {
     expect(getCommissionStatusFromReceipt("PENDING")).toBe("EXPECTED");
     expect(getCommissionStatusFromReceipt("PAID")).toBe("PENDING");
+  });
+
+  it("allows commission calculation on cancelled receipts only when posted payments exist", () => {
+    expect(canCalculateCommissionForReceipt("CANCELLED", 0)).toBe(false);
+    expect(canCalculateCommissionForReceipt("CANCELLED", 1)).toBe(true);
+    expect(canCalculateCommissionForReceipt("PAID", 0)).toBe(true);
   });
 
   it("transitions overdue commission statuses", () => {

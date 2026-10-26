@@ -29,7 +29,7 @@ export async function generateCommissionReport(formData: FormData) {
         status: "POSTED",
         paidDate: { gte: paidFrom, lt: paidToExclusive },
         policy: { organizationId: context.organizationId },
-        receipt: { organizationId: context.organizationId, status: { not: "CANCELLED" }, commissionCalculationStatus: { in: ["NOT_CALCULATED", "REVIEW"] }, commissions: { none: {} } },
+        receipt: { organizationId: context.organizationId, commissionCalculationStatus: { in: ["NOT_CALCULATED", "REVIEW"] }, commissions: { none: {} } },
       },
       distinct: ["receiptId"],
       select: { receiptId: true },

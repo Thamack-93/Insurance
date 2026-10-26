@@ -17,7 +17,7 @@ import { withTenantOrganization } from "@/lib/tenant-dal";
 import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
 import { deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 import { autoPolicyModeForCount, autoVehicleCount } from "@/lib/auto-policy-mode";
-import { calculateCommissionEstimate, parseCommissionRules, roundMoney, shouldUseAggregatePolicyOverride, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
+import { calculateCommissionEstimate, canCalculateCommissionForReceipt, parseCommissionRules, roundMoney, shouldUseAggregatePolicyOverride, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
 
 type CommissionScope = {
   organizationId: string;
@@ -83,10 +83,15 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       await assertOrganizationContextInTransaction(tx, context);
       const receipt = await tx.receipt.findFirst({
         where: { id: receiptId, organizationId: context.organizationId, ...(expectedPolicyId ? { policyId: expectedPolicyId } : {}) },
-        include: { policy: { include: { insuredAssets: { select: { id: true, description: true, unitClass: true } } } }, insurer: true, commissions: { select: { id: true } } },
+        include: {
+          policy: { include: { insuredAssets: { select: { id: true, description: true, unitClass: true } } } },
+          insurer: true,
+          commissions: { select: { id: true } },
+          payments: { where: { organizationId: context.organizationId, status: "POSTED" }, select: { id: true } },
+        },
       });
       if (!receipt) return errorResult("El recibo no existe en esta organización.");
-      if (receipt.status === "CANCELLED") return errorResult("No se calcula comisión para un recibo cancelado.");
+      if (!canCalculateCommissionForReceipt(receipt.status, receipt.payments.length)) return errorResult("No se calcula comisión para un recibo cancelado sin pagos POSTED.");
       if (receipt.commissions.length) return errorResult("Este recibo ya tiene una comisión guardada. No se sobrescriben cálculos históricos.");
 
       let reconciliation: { difference: number; status: "RECONCILED" | "REVIEW" };
@@ -284,7 +289,7 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const percentage = totalBase ? roundMoney(calculations.reduce((sum, item) => sum + (item.estimate.commissionableBase! * item.estimate.rate!), 0) / totalBase) : 0;
       const expectedDate = businessAddDays(receipt.dueDate, 30);
       const breakdown = calculations.map((item) => ({ assetId: item.assetId, description: item.description, unitClass: item.unitClass, components: { totalPremium: item.components.totalPremium, vatAmount: item.components.iva, issuanceExpenseAmount: item.components.issuanceExpense, surchargeAmount: item.components.installmentSurcharge, discountAmount: item.components.visibleDiscounts }, netPremium: item.estimate.netPremium, commissionableBase: item.estimate.commissionableBase, rate: item.estimate.rate, expectedAmount: item.estimate.amount, ruleId: item.estimate.rule?.id, ruleSource: item.estimate.rule?.source ?? "INSURER_RULE", ruleEvidence: item.estimate.rule?.evidence }));
-      const commission = await tx.commission.create({ data: { organizationId: context.organizationId, policyId: receipt.policyId, receiptId: receipt.id, clientId: receipt.clientId, insurerId: receipt.insurerId, expectedAmount, percentage, expectedDate, status: receipt.status === "PAID" ? "PENDING" : "EXPECTED", calculationBreakdownJson: JSON.stringify({ calculatedAt: new Date().toISOString(), ruleVersion: receipt.insurer.commissionRulesVersion, breakdown }) } });
+      const commission = await tx.commission.create({ data: { organizationId: context.organizationId, policyId: receipt.policyId, receiptId: receipt.id, clientId: receipt.clientId, insurerId: receipt.insurerId, expectedAmount, percentage, expectedDate, status: receipt.status === "PAID" || receipt.payments.length > 0 ? "PENDING" : "EXPECTED", calculationBreakdownJson: JSON.stringify({ calculatedAt: new Date().toISOString(), ruleVersion: receipt.insurer.commissionRulesVersion, breakdown }) } });
       await tx.receipt.update({ where: { id: receipt.id }, data: { commissionCalculationStatus: "CALCULATED", commissionReviewReason: null, updatedById: context.userId } });
       await writeActivityLog({ action: "CALCULATE_COMMISSION", entityType: "COMMISSION", entityId: commission.id, organizationId: context.organizationId, userId: context.userId, db: tx, newValue: { policyId: receipt.policyId, receiptId, expectedAmount, percentage, breakdown } });
       return successResult(commission.id, `/receipts/${receipt.id}`, `Comisión esperada calculada: ${expectedAmount.toFixed(2)} ${receipt.currency}.`);

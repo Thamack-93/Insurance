@@ -29,7 +29,13 @@ export function calculateVatFromGross(amountIncludingVat: number) {
   return roundPremiumMoney(amountIncludingVat * 16 / 116);
 }
 
-const PREMIUM_RECONCILIATION_TOLERANCE = 1;
+export const PREMIUM_RECONCILIATION_TOLERANCE = 1;
+
+/** Treat posted-payment excess up to the agreed one-peso tolerance as reconciled. */
+export function exceedsReceiptPaymentTolerance(totalPosted: number, receiptAmount: number) {
+  if (![totalPosted, receiptAmount].every(Number.isFinite) || totalPosted < 0 || receiptAmount < 0) return true;
+  return roundPremiumMoney(totalPosted - receiptAmount) > PREMIUM_RECONCILIATION_TOLERANCE;
+}
 
 /** Returns null until every component is explicitly captured. */
 export function deriveNetPremium(amount: number, breakdown: PremiumBreakdown): number | null {
@@ -97,7 +103,7 @@ export function reconcilePolicyReceiptPremium(
   receiptAmounts: PolicyReceiptReconciliationRow[],
 ) {
   const baseReceipts = receiptAmounts.filter((receipt) => !receipt.endorsementId);
-  const activeBaseReceipts = baseReceipts.filter((receipt) => receipt.status !== "CANCELLED");
+  const activeBaseReceipts = baseReceipts.filter((receipt) => receipt.status !== "CANCELLED" || (receipt.postedPaymentCount ?? 0) > 0);
   const receiptTotal = roundPremiumMoney(activeBaseReceipts.reduce((sum, receipt) => sum + receipt.amount, 0));
   const sequences = baseReceipts.flatMap((receipt) => receipt.receiptSequence == null ? [] : [receipt.receiptSequence]);
   const latestReceiptSequence = sequences.length ? Math.max(...sequences) : null;

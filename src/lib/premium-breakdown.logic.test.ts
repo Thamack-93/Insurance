@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocatePaidNetPremium, deriveNetPremium, deriveReceiptNetPremium, policyPremiumBreakdownChanged, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "./premium-breakdown";
+import { allocatePaidNetPremium, deriveNetPremium, deriveReceiptNetPremium, exceedsReceiptPaymentTolerance, policyPremiumBreakdownChanged, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "./premium-breakdown";
 
 describe("shared receipt premium breakdown", () => {
   it("derives prima neta with the user-confirmed signs", () => {
@@ -59,7 +59,7 @@ describe("shared receipt premium breakdown", () => {
     });
   });
 
-  it("does not offset non-final, paid, or unsupported cancelled receipts", () => {
+  it("counts paid cancelled receipts but does not offset non-final or unsupported cancellations", () => {
     const cancelledAt = new Date("2026-08-05T18:20:21.325Z");
     const finalUnpaid = { id: "cancelled-final", amount: 7018.17, status: "CANCELLED", receiptSequence: 4, cancelledAt, cancellationReason: "NON_PAYMENT", postedPaymentCount: 0 };
     expect(reconcilePolicyReceiptPremium(28826.67, [
@@ -67,7 +67,7 @@ describe("shared receipt premium breakdown", () => {
       { amount: 7018.17, status: "PAID", receiptSequence: 2 },
       { amount: 7018.17, status: "PAID", receiptSequence: 3 },
       { ...finalUnpaid, postedPaymentCount: 1 },
-    ])).toMatchObject({ cancellationOffset: 0, difference: 7018.17, status: "REVIEW" });
+    ])).toMatchObject({ receiptTotal: 28826.67, cancellationOffset: 0, difference: 0, status: "RECONCILED" });
     expect(reconcilePolicyReceiptPremium(28826.67, [
       { amount: 7772.16, status: "PAID", receiptSequence: 1 },
       { amount: 7018.17, status: "PAID", receiptSequence: 2 },
@@ -87,5 +87,11 @@ describe("shared receipt premium breakdown", () => {
     expect(reconcilePolicyReceiptPremium(101.01, [{ amount: 100, status: "PAID" }])).toMatchObject({ difference: 1.01, status: "REVIEW" });
     expect(reconcileEndorsementReceiptPremium(101, [{ amount: 100, status: "PAID" }])).toMatchObject({ difference: 1, status: "RECONCILED" });
     expect(reconcileEndorsementReceiptPremium(101.01, [{ amount: 100, status: "PAID" }])).toMatchObject({ difference: 1.01, status: "REVIEW" });
+  });
+
+  it("accepts posted-payment excess up to one peso and reviews larger excess", () => {
+    expect(exceedsReceiptPaymentTolerance(3737.21, 3737.16)).toBe(false);
+    expect(exceedsReceiptPaymentTolerance(101, 100)).toBe(false);
+    expect(exceedsReceiptPaymentTolerance(101.01, 100)).toBe(true);
   });
 });
