@@ -8,6 +8,7 @@ import { businessToday } from "@/lib/business-dates";
 import { assertOrganizationContextInTransaction, requireOrganizationRole, withTenantTransaction } from "@/lib/organization-context";
 import { BONUS_RULE_SOURCE_HASH, resolveBonusProgram } from "@/lib/bonus-rules";
 import { calculateBonusProjection, decimalOrNull } from "@/lib/bonus-calculation";
+import { autoFleetEligibilityFromInventory, damagePortfolioLossRatioEvidenceSchema, parseBonusEligibilityEvidence, recordBonusEvidenceReview } from "@/lib/bonus-evidence";
 
 function parseInput(formData: FormData) {
   const programKey = String(formData.get("programKey") ?? "");
@@ -22,13 +23,23 @@ function parseInput(formData: FormData) {
     throw new Error("Selecciona un programa, vendedor y periodo válidos para 2026.");
   }
   const lossRatioInput = String(formData.get("damagePortfolioLossRatio") ?? "").trim();
+  const lossRatioAsOf = String(formData.get("damagePortfolioLossRatioAsOf") ?? "").trim();
+  const lossRatioSource = String(formData.get("damagePortfolioLossRatioSource") ?? "").trim();
   const isDamageProgram = programKey.startsWith("DAMAGE_");
   const parsedLossRatio = lossRatioInput === "" ? null : Number(lossRatioInput) / 100;
-  if (isDamageProgram && parsedLossRatio !== null && (!Number.isFinite(parsedLossRatio) || parsedLossRatio < 0 || parsedLossRatio > 1)) {
-    throw new Error("La siniestralidad de la cartera total de Daños debe estar entre 0 y 100%.");
-  }
+  const damageEvidence = damagePortfolioLossRatioEvidenceSchema.safeParse({
+    lossRatioPercent: parsedLossRatio === null ? null : parsedLossRatio * 100,
+    asOf: lossRatioAsOf || null,
+    sourceReference: lossRatioSource || null,
+  });
+  if (isDamageProgram && !damageEvidence.success) throw new Error("Revisa el porcentaje, fecha de corte y fuente de siniestralidad de la cartera total de Daños.");
   const damagePortfolioLossRatio = isDamageProgram ? parsedLossRatio : null;
-  return { rule, programKey, sellerId, year, periodNumber: rule.period === "QUARTERLY" ? periodNumber : 1, damagePortfolioLossRatio };
+  return {
+    rule, programKey, sellerId, year, periodNumber: rule.period === "QUARTERLY" ? periodNumber : 1,
+    damagePortfolioLossRatio,
+    damagePortfolioLossRatioAsOf: isDamageProgram ? lossRatioAsOf || null : null,
+    damagePortfolioLossRatioSource: isDamageProgram ? lossRatioSource || null : null,
+  };
 }
 
 // TODO(data-retention): Review the five-day period after the initial testing
@@ -114,6 +125,110 @@ export async function previewBonus(formData: FormData) {
   });
   revalidatePath("/bonuses");
   redirect(`/bonuses?run=${encodeURIComponent(runId)}`);
+}
+
+export async function confirmAutoBonusEvidenceBatch(formData: FormData) {
+  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const sellerId = String(formData.get("sellerId") ?? "").trim();
+  const sourceReference = String(formData.get("sourceReference") ?? "").trim();
+  if (!sellerId || sourceReference.length < 3 || sourceReference.length > 500 || formData.get("reviewAttestation") !== "on") {
+    throw new Error("Selecciona un vendedor, registra la referencia de revisión y confirma que el inventario está completo.");
+  }
+
+  const result = await withTenantTransaction(context, async (tx) => {
+    await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+    const sellerMembership = await tx.organizationMembership.findFirst({
+      where: { organizationId: context.organizationId, userId: sellerId, active: true, organization: { status: "ACTIVE" }, user: { active: true } },
+      select: { id: true },
+    });
+    if (!sellerMembership) throw new Error("El vendedor seleccionado no pertenece a esta organización activa.");
+
+    const policies = await tx.policy.findMany({
+      where: {
+        organizationId: context.organizationId,
+        policyType: "AUTO",
+        OR: [
+          { bonusSellerId: sellerId },
+          { bonusSellerId: null, client: { organizationId: context.organizationId, portfolioOwnerId: sellerId } },
+        ],
+        payments: {
+          some: {
+            organizationId: context.organizationId,
+            status: "POSTED",
+            paidDate: { gte: new Date("2026-01-01T00:00:00.000Z"), lt: new Date("2027-01-01T00:00:00.000Z") },
+            receipt: { status: { not: "CANCELLED" } },
+          },
+        },
+      },
+      select: {
+        id: true, policyNumber: true, bonusEligibilityJson: true, riskDetails: true, riskDetailsReviewRequired: true,
+        insuredAssets: { select: { id: true } },
+      },
+      orderBy: [{ policyNumber: "asc" }, { id: "asc" }],
+    });
+
+    const now = new Date();
+    const evidenceAsOf = businessToday(now).toISOString().slice(0, 10);
+    const excludedPolicyIds: string[] = [];
+    const pendingInventoryPolicyIds: string[] = [];
+    const policyIds: string[] = [];
+    for (const policy of policies) {
+      const riskDetails = policy.riskDetails && typeof policy.riskDetails === "object" && !Array.isArray(policy.riskDetails)
+        ? policy.riskDetails as { policyType?: unknown; data?: { vehicles?: unknown } }
+        : null;
+      const vehicleRows = riskDetails?.policyType === "AUTO" && Array.isArray(riskDetails.data?.vehicles) ? riskDetails.data.vehicles : [];
+      const structuredVehicleCount = vehicleRows.filter((row) => row && typeof row === "object" && Object.values(row).some((value) => typeof value === "string" && value.trim())).length;
+      const fleet = autoFleetEligibilityFromInventory({
+        insuredAssetCount: policy.insuredAssets.length,
+        structuredVehicleCount,
+        adminConfirmedInventoryComplete: true,
+      });
+      const priorEvidence = parseBonusEligibilityEvidence(policy.bonusEligibilityJson);
+      const evidence = {
+        ...priorEvidence,
+        productEligible: true,
+        fleetUnder50: fleet.fleetUnder50,
+        autoExclusionsReviewed: true,
+        sellerAttributionConfirmed: true,
+        sourceReference,
+        evidenceAsOf,
+        inventoryVehicleCount: fleet.vehicleCount,
+        inventoryAssetsCount: policy.insuredAssets.length,
+        inventoryStructuredCount: structuredVehicleCount,
+        inventoryReviewRequiredAtConfirmation: policy.riskDetailsReviewRequired,
+        batchAttestation: "AUTO_2026_SELLER_POLICIES",
+      };
+      const value = recordBonusEvidenceReview(JSON.stringify(evidence), context.userId, now);
+      await tx.policy.update({ where: { id: policy.id, organizationId: context.organizationId }, data: { bonusSellerId: sellerId, bonusEligibilityJson: value } });
+      policyIds.push(policy.id);
+      if (fleet.fleetUnder50 === false) excludedPolicyIds.push(policy.id);
+      if (fleet.fleetUnder50 === null) pendingInventoryPolicyIds.push(policy.id);
+    }
+
+    await writeActivityLog({
+      organizationId: context.organizationId,
+      entityType: "Policy",
+      entityId: "BONUS_AUTO_BULK_CONFIRMATION",
+      action: "POLICY_AUTO_BONUS_BULK_CONFIRM",
+      newValue: {
+        sellerId,
+        policyIds,
+        policyCount: policyIds.length,
+        fleetExcludedPolicyIds: excludedPolicyIds,
+        pendingInventoryPolicyIds,
+        sourceReference,
+        evidenceAsOf,
+        reviewedById: context.userId,
+        reviewedAt: now.toISOString(),
+      },
+      userId: context.userId,
+      db: tx,
+    });
+    return { confirmed: policyIds.length, excluded: excludedPolicyIds.length, pendingInventory: pendingInventoryPolicyIds.length };
+  });
+
+  revalidatePath("/bonuses");
+  redirect(`/bonuses?autosConfirmed=${result.confirmed}&autosExcluded=${result.excluded}&autosPendingInventory=${result.pendingInventory}`);
 }
 
 export async function approveBonusRun(formData: FormData) {

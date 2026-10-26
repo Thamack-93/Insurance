@@ -15,6 +15,7 @@ export const API_SECURITY_MANIFEST = {
   "/api/admin/knowledge-base/search": "admin",
   "/api/backups/artifacts/[artifactId]/download": "admin",
   "/api/backups/[filename]/download": "admin",
+  "/api/bonuses/[runId]/snapshot": "admin",
   "/api/commissions/stats": "authenticated",
   "/api/commissions/statements/import": "authenticated",
   "/api/commissions/[id]/status": "authenticated",

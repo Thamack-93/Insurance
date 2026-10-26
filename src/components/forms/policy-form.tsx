@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PolicyRenewalSelector } from "@/components/policies/policy-renewal-selector";
 import { PolicyRiskDetailsFields } from "@/components/forms/policy-risk-details-fields";
+import { PolicyBonusEvidenceFields } from "@/components/forms/policy-bonus-evidence-fields";
 import { emptyPolicyRiskDetails } from "@/lib/policy-risk-details";
 import {
   ControlledSelect,
@@ -96,6 +97,7 @@ export function PolicyForm({
   const watchedDiscount = useWatch({ control, name: "premiumDiscountAmount" });
   const watchedCurrency = useWatch({ control, name: "currency" });
   const watchedRiskDetails = useWatch({ control, name: "riskDetails" });
+  const watchedBonusEligibilityJson = useWatch({ control, name: "bonusEligibilityJson" });
   const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
   const [renewalCandidateResult, setRenewalCandidateResult] = useState<{ key: string; candidates: SerialRenewalCandidate[] } | null>(null);
   const vehicles = selectedPolicyType === "AUTO" && watchedRiskDetails && typeof watchedRiskDetails === "object"
@@ -380,9 +382,17 @@ export function PolicyForm({
             <FormField label="Notas" htmlFor="notes" error={errors.notes?.message}>
               <Textarea id="notes" rows={5} {...register("notes")} />
             </FormField>
-            <FormField label="Evidencia de elegibilidad para bonos (JSON)" htmlFor="bonusEligibilityJson" error={errors.bonusEligibilityJson?.message} hint={canEditBonusEvidence ? 'Guarda criterios verificados y sus valores, por ejemplo: {"productEligible":true,"lossRatio":0.42,"sellerAttributionConfirmed":true,"source":"reporte aseguradora 2026"}. Para pólizas 2026 históricas, administración confirma la atribución al guardar.' : "Solo administración registra evidencia de elegibilidad para bonos."}>
-              <Textarea id="bonusEligibilityJson" rows={4} disabled={!canEditBonusEvidence} {...register("bonusEligibilityJson")} />
-            </FormField>
+            {selectedPolicyType === "AUTO" || ["DANOS", "HOGAR", "EMPRESARIAL", "RESPONSABILIDAD_CIVIL", "OTRO"].includes(selectedPolicyType) ? (
+              canEditBonusEvidence ? (
+                <PolicyBonusEvidenceFields
+                  policyType={selectedPolicyType}
+                  value={watchedBonusEligibilityJson ?? ""}
+                  disabled={!canEditBonusEvidence}
+                  error={errors.bonusEligibilityJson?.message}
+                  onChange={(value) => setValue("bonusEligibilityJson", value, { shouldDirty: true, shouldValidate: true })}
+                />
+              ) : <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">Solo administración registra evidencia de elegibilidad para bonos.</p>
+            ) : null}
           </FormSection>
 
           <FormActions cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
