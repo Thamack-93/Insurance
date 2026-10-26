@@ -59,7 +59,7 @@ describe("shared receipt premium breakdown", () => {
     });
   });
 
-  it("counts paid cancelled receipts but does not offset non-final or unsupported cancellations", () => {
+  it("does not offset non-final, paid, or unsupported cancelled receipts", () => {
     const cancelledAt = new Date("2026-08-05T18:20:21.325Z");
     const finalUnpaid = { id: "cancelled-final", amount: 7018.17, status: "CANCELLED", receiptSequence: 4, cancelledAt, cancellationReason: "NON_PAYMENT", postedPaymentCount: 0 };
     expect(reconcilePolicyReceiptPremium(28826.67, [
@@ -67,7 +67,7 @@ describe("shared receipt premium breakdown", () => {
       { amount: 7018.17, status: "PAID", receiptSequence: 2 },
       { amount: 7018.17, status: "PAID", receiptSequence: 3 },
       { ...finalUnpaid, postedPaymentCount: 1 },
-    ])).toMatchObject({ receiptTotal: 28826.67, cancellationOffset: 0, difference: 0, status: "RECONCILED" });
+    ])).toMatchObject({ cancellationOffset: 0, difference: 7018.17, status: "REVIEW" });
     expect(reconcilePolicyReceiptPremium(28826.67, [
       { amount: 7772.16, status: "PAID", receiptSequence: 1 },
       { amount: 7018.17, status: "PAID", receiptSequence: 2 },

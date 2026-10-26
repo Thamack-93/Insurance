@@ -103,7 +103,7 @@ export function reconcilePolicyReceiptPremium(
   receiptAmounts: PolicyReceiptReconciliationRow[],
 ) {
   const baseReceipts = receiptAmounts.filter((receipt) => !receipt.endorsementId);
-  const activeBaseReceipts = baseReceipts.filter((receipt) => receipt.status !== "CANCELLED" || (receipt.postedPaymentCount ?? 0) > 0);
+  const activeBaseReceipts = baseReceipts.filter((receipt) => receipt.status !== "CANCELLED");
   const receiptTotal = roundPremiumMoney(activeBaseReceipts.reduce((sum, receipt) => sum + receipt.amount, 0));
   const sequences = baseReceipts.flatMap((receipt) => receipt.receiptSequence == null ? [] : [receipt.receiptSequence]);
   const latestReceiptSequence = sequences.length ? Math.max(...sequences) : null;

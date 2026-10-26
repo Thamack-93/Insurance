@@ -6,6 +6,7 @@ import {
   calculateOverdueStatus,
   canCalculateCommissionForReceipt,
   getCommissionStatusFromReceipt,
+  shouldRequirePolicyPremiumReconciliation,
   shouldUseAggregatePolicyOverride,
 } from "./commissions.logic";
 
@@ -102,6 +103,12 @@ describe("commissions.logic", () => {
     expect(canCalculateCommissionForReceipt("CANCELLED", 0)).toBe(false);
     expect(canCalculateCommissionForReceipt("CANCELLED", 1)).toBe(true);
     expect(canCalculateCommissionForReceipt("PAID", 0)).toBe(true);
+  });
+
+  it("uses receipt evidence instead of policy total reconciliation for paid cancelled receipts", () => {
+    expect(shouldRequirePolicyPremiumReconciliation("CANCELLED", 1)).toBe(false);
+    expect(shouldRequirePolicyPremiumReconciliation("CANCELLED", 0)).toBe(true);
+    expect(shouldRequirePolicyPremiumReconciliation("PAID", 1)).toBe(true);
   });
 
   it("transitions overdue commission statuses", () => {
