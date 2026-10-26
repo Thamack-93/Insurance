@@ -56,7 +56,7 @@ export const SearchResults = memo(function SearchResults() {
   let flatIndex = -1;
 
   return (
-    <div id="global-search-results" role="listbox" className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[420px] overflow-y-auto rounded-md border bg-popover shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:top-20 max-sm:z-[60] max-sm:mt-0 max-sm:max-h-[min(60vh,420px)]">
+    <div id="global-search-results" role="listbox" className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[420px] overflow-y-auto rounded-md border bg-popover shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:top-full max-sm:z-[60] max-sm:max-h-[min(60vh,420px)]">
       <div className="border-b p-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Search className="size-4" />
