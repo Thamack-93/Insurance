@@ -84,11 +84,13 @@ export default async function ReceiptsPage({
         () => db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
         () => resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
         () => db.receipt.findMany({
+          relationLoadStrategy: "join",
           where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
           include: { client: true, policy: true, insurer: true, endorsement: true },
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
         }),
         () => db.payment.findMany({
+          relationLoadStrategy: "join",
           where: { ...scopedPaymentWhere, status: "POSTED" },
           include: {
             receipt: { select: { id: true, receiptNumber: true, dueDate: true, endorsement: { select: { id: true, endorsementNumber: true } } } },
@@ -99,6 +101,7 @@ export default async function ReceiptsPage({
           take: 50,
         }),
         () => db.receiptReconciliationIssue.findMany({
+          relationLoadStrategy: "join",
           where: { ...scopedReceiptIssueWhere, status: "OPEN" },
           include: {
             receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
@@ -643,6 +646,7 @@ async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: 
   const totalOpenCount = await db.receipt.count({ where: { ...baseWhere, organizationId } });
   const filteredCount = await db.receipt.count({ where: { ...where, organizationId } });
   const pagedReceipts = await db.receipt.findMany({
+        relationLoadStrategy: "join",
         where: { ...where, organizationId },
         include: {
           client: true,
