@@ -25,9 +25,9 @@ import { getPolicyFamilyPolicies } from "@/lib/policy-families";
 import { policyTypeLabel } from "@/lib/status";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { normalizeReturnTo } from "@/lib/return-to";
-import { getPolicyRiskDetailEntries } from "@/lib/policy-risk-details";
 import { compareRenewalPolicies } from "@/lib/policy-renewal-comparison";
 import { PolicyRenewalComparison } from "@/components/policies/policy-renewal-comparison";
+import { PolicyRiskOverview } from "@/components/policies/policy-risk-overview";
 import { reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 
 const frequencyLabels: Record<string, string> = {
@@ -210,7 +210,6 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
   const activeBaseReceipts = receipts.filter((receipt) => receipt.status !== "CANCELLED");
   const basePendingCount = activeBaseReceipts.filter((receipt) => receipt.status !== "PAID").length;
   const paidBaseReceiptCount = activeBaseReceipts.filter((receipt) => receipt.status === "PAID").length;
-  const riskDetailEntries = getPolicyRiskDetailEntries(policy.riskDetails);
   const renewalDays = daysUntil(policy.endDate);
   return (
     <div className="flex flex-col gap-6">
@@ -271,108 +270,22 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
           </div>
         </section>
 
-        <section aria-labelledby="insured-risk-heading" className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <h2 id="insured-risk-heading" className="text-lg font-semibold text-foreground">Riesgo asegurado</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Objeto, personas y características principales del riesgo.</p>
-            </div>
-          </div>
-          <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Objeto asegurado</p>
-                <p className="mt-2 break-words text-lg font-semibold text-foreground">
-                  {policy.insuredObject?.trim() || policy.insuredAssets[0]?.description || policy.insuredParties[0]?.fullName || "Pendiente de capturar"}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">{policy.client.fullName} · {policy.insurer.name} · {policyTypeLabel(policy.policyType)}</p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {policy.insuredAssets.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-muted-foreground">{policy.insuredAssets.length} {policy.insuredAssets.length === 1 ? "activo" : "activos"}</span> : null}
-                {policy.insuredParties.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-muted-foreground">{policy.insuredParties.length} {policy.insuredParties.length === 1 ? "persona asegurada" : "personas aseguradas"}</span> : null}
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Plan de pago</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{policy.paymentPlan?.trim() || "Sin capturar"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Frecuencia</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}</p>
-              </div>
-              {policy.beneficiaryInfo ? (
-                <div>
-                  <p className="text-xs text-muted-foreground">Beneficiarios</p>
-                  <p className="mt-1 break-words text-sm font-medium text-foreground">{policy.beneficiaryInfo}</p>
-                </div>
-              ) : null}
-              {policy.commissionRateOverride !== null ? (
-                <div>
-                  <p className="text-xs text-muted-foreground">Tasa específica de comisión</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{Number(policy.commissionRateOverride).toFixed(2)}%</p>
-                </div>
-              ) : null}
-            </div>
-
-            {policy.riskDetailsReviewRequired ? (
-              <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-                La descripción histórica requiere revisión manual. Se conserva el texto original.
-              </p>
-            ) : null}
-
-            {(riskDetailEntries.length > 0 || policy.insuredAssets.length > 0 || policy.insuredParties.length > 0 || policy.notes) ? (
-              <details className="group mt-4 rounded-xl border border-border/70 bg-muted/20">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-medium marker:content-none [&::-webkit-details-marker]:hidden">
-                  <span>Ver datos completos del riesgo y notas</span>
-                  <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="space-y-4 border-t border-border/70 p-3">
-                  {riskDetailEntries.length ? (
-                    <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                      {riskDetailEntries.map((entry) => (
-                        <div key={`${entry.label}-${entry.value}`}>
-                          <p className="text-xs text-muted-foreground">{entry.label}</p>
-                          <p className="mt-1 break-words text-sm font-medium text-foreground">{entry.value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {policy.insuredParties.length ? (
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">Personas aseguradas</h3>
-                      <ul className="mt-2 divide-y divide-border/70">
-                        {policy.insuredParties.map((party) => (
-                          <li key={party.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm">
-                            <span>{party.fullName}</span>
-                            <span className="text-xs uppercase tracking-wide text-muted-foreground">{party.isPrimary ? "Principal" : "Secundario"}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {policy.insuredAssets.length > 1 ? (
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">Activos asegurados</h3>
-                      <ul className="mt-2 divide-y divide-border/70">
-                        {policy.insuredAssets.map((asset) => (
-                          <li key={asset.id} className="flex flex-col gap-1 py-2 text-sm">
-                            <span className="font-medium">{asset.description}</span>
-                            <span className="text-xs text-muted-foreground">{asset.assetType}{asset.serialNumber ? ` · Serie ${asset.serialNumber}` : ""}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : policy.insuredAssets[0]?.serialNumber ? (
-                    <p className="text-sm text-muted-foreground">Serie: <span className="font-medium text-foreground">{policy.insuredAssets[0].serialNumber}</span></p>
-                  ) : null}
-                  {policy.notes ? <div><h3 className="text-sm font-semibold text-foreground">Notas</h3><p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{policy.notes}</p></div> : null}
-                </div>
-              </details>
-            ) : null}
-          </div>
-        </section>
+        <PolicyRiskOverview
+          policyType={policy.policyType}
+          clientName={policy.client.fullName}
+          insurerName={policy.insurer.name}
+          insuredObject={policy.insuredObject}
+          riskDetails={policy.riskDetails}
+          riskDetailsReviewRequired={policy.riskDetailsReviewRequired}
+          insuredAssets={policy.insuredAssets}
+          insuredParties={policy.insuredParties}
+          notes={policy.notes}
+          paymentPlan={policy.paymentPlan}
+          paymentFrequency={policy.paymentFrequency}
+          paymentFrequencyLabel={frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}
+          beneficiaryInfo={policy.beneficiaryInfo}
+          commissionRateOverride={policy.commissionRateOverride === null ? null : Number(policy.commissionRateOverride)}
+        />
 
         <section aria-labelledby="related-policy-heading" className="space-y-3">
           <div>

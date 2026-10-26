@@ -12,6 +12,7 @@ import { getBreadcrumbSegments } from "@/lib/navigation";
 
 export function AppTopbar({
   userMenu,
+  mobileUserMenu,
   isAdmin = false,
   isSuperAdmin = false,
   hasOrganizationContext = false,
@@ -23,6 +24,7 @@ export function AppTopbar({
   initialTheme,
 }: {
   userMenu?: ReactNode;
+  mobileUserMenu?: ReactNode;
   isAdmin?: boolean;
   isSuperAdmin?: boolean;
   hasOrganizationContext?: boolean;
@@ -37,11 +39,31 @@ export function AppTopbar({
   const searchParams = useSearchParams();
   const { openNora } = useNoraSession();
   const segments = getBreadcrumbSegments(pathname, searchParams);
+  const mobileFooter = (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <ThemeToggle initialTheme={initialTheme} />
+        {hasOrganizationContext && !isDemo ? (
+          <button
+            type="button"
+            onClick={() => openNora()}
+            aria-label="Abrir Nora"
+            className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-sidebar-border px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          >
+            <Sparkles className="size-4" aria-hidden />
+            Nora
+          </button>
+        ) : null}
+      </div>
+      {mobileUserMenu}
+    </div>
+  );
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center gap-3 px-3 sm:px-5 lg:gap-4 lg:px-8">
-        <AppMobileSidebar isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
+        <AppMobileSidebar isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} footerContent={mobileFooter} />
+        <span className="shrink-0 font-display text-sm font-semibold tracking-tight text-foreground md:hidden">PolicyDesk</span>
         <nav aria-label="Breadcrumb" className="hidden shrink-0 items-center gap-2 text-sm text-muted-foreground md:flex">
           <span className="font-display text-[15px] text-foreground">PolicyDesk</span>
           {segments.map(({ segment, label }, index) => (
@@ -52,7 +74,7 @@ export function AppTopbar({
           ))}
         </nav>
 
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-md border bg-card px-3 py-1.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] sm:px-3 md:mx-auto md:w-full md:max-w-2xl md:flex-1">
           {hasOrganizationContext ? <SearchInput /> : <span className="px-2 text-sm text-muted-foreground">Selecciona una organización para operar</span>}
           {hasOrganizationContext ? <button
             type="button"
@@ -64,28 +86,30 @@ export function AppTopbar({
           </button> : null}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           {hasOrganizationContext && organizationName ? (
             <div className="hidden max-w-52 truncate rounded-md border bg-card px-2.5 py-1 text-xs text-muted-foreground xl:block" title={organizationName}>
               <span className="font-medium text-foreground">{organizationName}</span>
               {membershipRole ? <span className="ml-1.5">· {membershipRole === "AGENT" ? "Agente" : "Administrador"}</span> : null}
             </div>
           ) : null}
-          {isDemo ? <span aria-label="Organización de demostración" title="Organización de demostración" className="inline-flex shrink-0 rounded-md border border-cyan-300 bg-cyan-50 px-1.5 py-1 text-[10px] font-semibold text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-200 sm:px-2.5 sm:text-xs">Demo</span> : null}
-          <ThemeToggle initialTheme={initialTheme} />
-          {hasOrganizationContext && !isDemo ? (
-            <button
-              type="button"
-              onClick={() => openNora()}
-              aria-label="Abrir Nora"
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Sparkles className="size-4" aria-hidden />
-              <span className="hidden sm:inline">Nora</span>
-            </button>
-          ) : null}
+          {isDemo ? <span aria-label="Organización de demostración" title="Organización de demostración" className="hidden shrink-0 rounded-md border border-cyan-300 bg-cyan-50 px-1.5 py-1 text-[10px] font-semibold text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-200 sm:inline-flex sm:px-2.5 sm:text-xs">Demo</span> : null}
+          <div className="hidden items-center gap-2 md:flex">
+            <ThemeToggle initialTheme={initialTheme} />
+            {hasOrganizationContext && !isDemo ? (
+              <button
+                type="button"
+                onClick={() => openNora()}
+                aria-label="Abrir Nora"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Sparkles className="size-4" aria-hidden />
+                <span>Nora</span>
+              </button>
+            ) : null}
+            {userMenu}
+          </div>
           {hasOrganizationContext ? <NotificationsBell isAdmin={isAdmin} unreadCount={unreadNotificationCount} notifications={notifications} /> : null}
-          {userMenu}
         </div>
       </div>
       {isDemo ? (

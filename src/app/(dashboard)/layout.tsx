@@ -117,6 +117,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
                 isDemo={organizationKind === "DEMO"}
                 membershipRole={organization?.membershipRole}
                 userMenu={<UserMenu />}
+                mobileUserMenu={<UserMenu mobile />}
                 unreadNotificationCount={unreadNotificationCount}
                 notifications={bellNotifications}
                 initialTheme={initialTheme}

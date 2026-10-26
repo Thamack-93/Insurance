@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -10,7 +11,7 @@ import { SidebarNav } from "./sidebar-nav";
 import { cn } from "@/lib/utils";
 import { getUtilityNavigation, isUtilityNavigationItemActive } from "@/lib/navigation";
 
-export function AppMobileSidebar({ isAdmin = false, isSuperAdmin = false }: { isAdmin?: boolean; isSuperAdmin?: boolean }) {
+export function AppMobileSidebar({ isAdmin = false, isSuperAdmin = false, footerContent }: { isAdmin?: boolean; isSuperAdmin?: boolean; footerContent?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const utilities = getUtilityNavigation(isAdmin, isSuperAdmin);
@@ -68,6 +69,7 @@ export function AppMobileSidebar({ isAdmin = false, isSuperAdmin = false }: { is
               );
             })}
           </div>
+          {footerContent ? <div className="mt-3 border-t border-sidebar-border pt-3">{footerContent}</div> : null}
         </div>
       </SheetContent>
     </Sheet>
