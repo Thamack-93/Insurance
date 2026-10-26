@@ -4,7 +4,7 @@ import { normalizeMexicanPhone } from "./phone";
 import { isSyntheticOutboundEmail, isSyntheticOutboundPhone } from "./outbound-contact-guard";
 
 export const QUALITAS_PAYMENT_LINK_ENTRYPOINT =
-  "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/inicio";
+  "https://www.qualitas.com.mx/web/qmx/pago-de-poliza";
 
 export const QUALITAS_PAYMENT_LINK_OUTCOMES = [
   "SUCCESS",
