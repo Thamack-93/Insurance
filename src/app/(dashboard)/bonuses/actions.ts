@@ -317,7 +317,14 @@ async function acceptBonusRunPremiumItems(
       data: {
         status: "INCLUDED",
         reason: acceptedReason,
-        evidenceJson: JSON.stringify({ ...evidence, administratorPremiumAcceptance: { acceptedById: userId, acceptedAt, scope: "THIS_BONUS_RUN_ONLY", acceptedNetPremiumPaid: item.netPremiumPaid?.toString() ?? null } }),
+        evidenceJson: JSON.stringify({ ...evidence, administratorPremiumAcceptance: {
+          acceptedById: userId,
+          acceptedAt,
+          scope: "THIS_BONUS_RUN_ONLY",
+          acceptedNetPremiumPaid: item.netPremiumPaid?.toString() ?? null,
+          acceptedNetPremiumCurrency: item.currency ?? "MXN",
+          acceptedEligibleAmountMxn: item.eligibleAmount?.toString() ?? null,
+        } }),
         version: { increment: 1 },
       },
     });
@@ -342,7 +349,17 @@ async function acceptBonusRunPremiumItems(
   const reviewReasons = [...new Set([...runLevelReviewReasons, ...refreshedItems.filter((item) => item.status === "REVIEW").map((item) => item.reason).filter((value): value is string => Boolean(value))])];
   const projectionItems = Array.isArray(projection.items) ? projection.items as Array<Record<string, unknown>> : [];
   const updatedProjectionItems = projectionItems.map((item) => paymentIds.has(typeof item.paymentId === "string" ? item.paymentId : null)
-    ? { ...item, status: "INCLUDED", reason: acceptedReason, evidence: { ...(item.evidence && typeof item.evidence === "object" ? item.evidence as Record<string, unknown> : {}), administratorPremiumAcceptance: { acceptedById: userId, acceptedAt, scope: "THIS_BONUS_RUN_ONLY" } } }
+    ? { ...item, status: "INCLUDED", reason: acceptedReason, evidence: {
+      ...(item.evidence && typeof item.evidence === "object" ? item.evidence as Record<string, unknown> : {}),
+      administratorPremiumAcceptance: {
+        acceptedById: userId,
+        acceptedAt,
+        scope: "THIS_BONUS_RUN_ONLY",
+        acceptedNetPremiumPaid: typeof item.netPremiumPaid === "string" ? item.netPremiumPaid : null,
+        acceptedNetPremiumCurrency: typeof item.currency === "string" ? item.currency : "MXN",
+        acceptedEligibleAmountMxn: typeof item.eligibleAmount === "string" ? item.eligibleAmount : null,
+      },
+    } }
     : item);
   const snapshotJson = JSON.stringify({ ...snapshot, projection: { ...projection, items: updatedProjectionItems, baseAmount: baseAmount.toFixed(2), bonusRate, bonusAmount, status: reviewReasons.length ? "REVIEW" : "READY", reviewReasons } });
 
@@ -355,12 +372,27 @@ async function acceptBonusRunPremiumItems(
     },
   });
   const acceptedPolicyIds = [...new Set(targetItems.map((item) => item.policyId).filter((id): id is string => Boolean(id)))];
-  const acceptedNetPremiumPaid = targetItems.reduce((sum, item) => sum.add(item.netPremiumPaid ?? 0), new Prisma.Decimal(0)).toFixed(2);
+  const acceptedNetPremiumByCurrency = new Map<string, Prisma.Decimal>();
+  for (const item of targetItems) {
+    const currency = (item.currency ?? "MXN").toUpperCase();
+    acceptedNetPremiumByCurrency.set(currency, (acceptedNetPremiumByCurrency.get(currency) ?? new Prisma.Decimal(0)).add(item.netPremiumPaid ?? 0));
+  }
+  const acceptedEligibleAmountMxn = targetItems.reduce((sum, item) => sum.add(item.eligibleAmount ?? 0), new Prisma.Decimal(0)).toFixed(2);
   await writeActivityLog({
     organizationId, entityType: "BonusRun", entityId: run.id,
     action: policyId ? "BONUS_RUN_POLICY_PREMIUM_ACCEPT" : "BONUS_RUN_PREMIUM_BULK_ACCEPT",
     oldValue: { status: run.status, baseAmount: run.baseAmount.toString(), bonusAmount: run.bonusAmount?.toString() ?? null },
-    newValue: { policyId: policyId ?? null, policyIds: acceptedPolicyIds, paymentIds: [...paymentIds], acceptedNetPremiumPaid, scope: "THIS_BONUS_RUN_ONLY", baseAmount: baseAmount.toFixed(2), bonusAmount, version: run.version + 1 },
+    newValue: {
+      policyId: policyId ?? null,
+      policyIds: acceptedPolicyIds,
+      paymentIds: [...paymentIds],
+      acceptedNetPremiumPaidByCurrency: Object.fromEntries([...acceptedNetPremiumByCurrency].map(([currency, amount]) => [currency, amount.toFixed(2)])),
+      acceptedEligibleAmountMxn,
+      scope: "THIS_BONUS_RUN_ONLY",
+      baseAmount: baseAmount.toFixed(2),
+      bonusAmount,
+      version: run.version + 1,
+    },
     userId, db: tx,
   });
   return targetItems.length;
