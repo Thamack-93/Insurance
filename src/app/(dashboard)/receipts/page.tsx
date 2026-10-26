@@ -39,7 +39,7 @@ import {
 import { withTenantOrganization, type TenantDb } from "@/lib/tenant-dal";
 import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 import { logError } from "@/lib/logger";
-import { isReceiptQualitasEnabled, resolveReceiptAuxiliary } from "@/lib/receipts-page";
+import { isReceiptQualitasEnabled, resolveReceiptAuxiliary, settleReceiptReadsSequentially } from "@/lib/receipts-page";
 
 const PAGE_SIZE = 25;
 
@@ -77,20 +77,18 @@ export default async function ReceiptsPage({
   const orderBy = buildReceiptListOrderBy(filters);
 
   const pageDataPromise = withTenantOrganization(scope.organizationId, async (db) => {
-    const [organizationKind, core] = await Promise.all([
-      db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }),
-      loadReceiptPageCore(db, scope.organizationId, { baseWhere, where, now, orderBy, page }),
-    ]);
+    const organizationKind = await db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } });
+    const core = await loadReceiptPageCore(db, scope.organizationId, { baseWhere, where, now, orderBy, page });
     const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult] =
-      await Promise.allSettled([
-        db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
-        resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
-        db.receipt.findMany({
+      await settleReceiptReadsSequentially([
+        () => db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
+        () => resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
+        () => db.receipt.findMany({
           where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
           include: { client: true, policy: true, insurer: true, endorsement: true },
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
         }),
-        db.payment.findMany({
+        () => db.payment.findMany({
           where: { ...scopedPaymentWhere, status: "POSTED" },
           include: {
             receipt: { select: { id: true, receiptNumber: true, dueDate: true, endorsement: { select: { id: true, endorsementNumber: true } } } },
@@ -100,7 +98,7 @@ export default async function ReceiptsPage({
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
           take: 50,
         }),
-        db.receiptReconciliationIssue.findMany({
+        () => db.receiptReconciliationIssue.findMany({
           where: { ...scopedReceiptIssueWhere, status: "OPEN" },
           include: {
             receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
@@ -638,14 +636,13 @@ async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: 
   page: number;
 }) {
   const { baseWhere, where, now, orderBy, page } = input;
-  const [openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts] = await Promise.all([
-      db.receipt.count({ where: { ...baseWhere, organizationId } }),
-      db.receipt.count({ where: { ...baseWhere, organizationId, dueDate: { lt: now } } }),
-      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId } }),
-      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId, dueDate: { lt: now } } }),
-      db.receipt.count({ where: { ...baseWhere, organizationId } }),
-      db.receipt.count({ where: { ...where, organizationId } }),
-      db.receipt.findMany({
+  const openCount = await db.receipt.count({ where: { ...baseWhere, organizationId } });
+  const overdueCount = await db.receipt.count({ where: { ...baseWhere, organizationId, dueDate: { lt: now } } });
+  const outstandingAgg = await db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId } });
+  const overdueAgg = await db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId, dueDate: { lt: now } } });
+  const totalOpenCount = await db.receipt.count({ where: { ...baseWhere, organizationId } });
+  const filteredCount = await db.receipt.count({ where: { ...where, organizationId } });
+  const pagedReceipts = await db.receipt.findMany({
         where: { ...where, organizationId },
         include: {
           client: true,
@@ -657,7 +654,6 @@ async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: 
         orderBy,
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
-      }),
-  ]);
+      });
   return { openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts };
 }

@@ -1,7 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
-import { isReceiptQualitasEnabled, resolveReceiptAuxiliary } from "@/lib/receipts-page";
+import { isReceiptQualitasEnabled, resolveReceiptAuxiliary, settleReceiptReadsSequentially } from "@/lib/receipts-page";
 
 describe("receipt page resilience", () => {
+  it("serializes tenant reads and continues after an individual read rejects", async () => {
+    const events: string[] = [];
+    const failure = new Error("optional read failed");
+
+    const results = await settleReceiptReadsSequentially([
+      async () => {
+        events.push("first:start");
+        await Promise.resolve();
+        events.push("first:end");
+        return "first";
+      },
+      async () => {
+        events.push("second");
+        throw failure;
+      },
+      async () => {
+        events.push("third");
+        return 3;
+      },
+    ] as const);
+
+    expect(events).toEqual(["first:start", "first:end", "second", "third"]);
+    expect(results).toEqual([
+      { status: "fulfilled", value: "first" },
+      { status: "rejected", reason: failure },
+      { status: "fulfilled", value: 3 },
+    ]);
+  });
+
   it("uses the auxiliary fallback and reports the rejected query", () => {
     const onRejected = vi.fn();
     const reason = new Error("database unavailable");
