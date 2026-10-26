@@ -14,6 +14,7 @@ import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
 import { BonusProjectionForm } from "./bonus-projection-form";
 import { BonusRunItemsTable } from "./bonus-run-items-table";
+import { AutoBonusEvidenceBatchForm } from "./auto-bonus-evidence-batch-form";
 import { ChevronDown } from "lucide-react";
 
 function bonusAmountLabel(eligibilityOnly: boolean | undefined, amount: unknown, status: string) {
@@ -28,26 +29,29 @@ function bonusRateLabel(eligibilityOnly: boolean | undefined, rate: unknown, sta
   return status === "READY" ? "Sin banda" : "Pendiente";
 }
 
-export default async function BonusesPage({ searchParams }: { searchParams?: Promise<{ run?: string }> }) {
+export default async function BonusesPage({ searchParams }: { searchParams?: Promise<{ run?: string; autosConfirmed?: string; autosExcluded?: string; autosPendingInventory?: string }> }) {
   await connection();
   const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
-  const runId = (await searchParams)?.run;
-  const [sellers, run, recentRuns, retentionStatus, databaseClockRows] = await withTenantTransaction(context, async (db) => Promise.all([
-    db.user.findMany({
+  const searchParamsResult = (await searchParams) ?? {};
+  const runId = searchParamsResult.run;
+  const { sellers, run, recentRuns, retentionStatus, databaseClockRows } = await withTenantTransaction(context, async (db) => {
+    const sellers = await db.user.findMany({
       where: { active: true, organizationMemberships: { some: { organizationId: context.organizationId, active: true } } },
       select: { id: true, name: true, email: true }, orderBy: { name: "asc" },
-    }),
-    runId ? db.bonusRun.findFirst({
+    });
+    const run = runId ? await db.bonusRun.findFirst({
       where: { id: runId, organizationId: context.organizationId },
+      relationLoadStrategy: "join",
       include: { seller: { select: { name: true } }, approvedBy: { select: { name: true } }, ruleSet: { select: { version: true, sourceFileName: true, sourceHash: true } }, items: { include: { payment: { select: { paidDate: true } }, policy: { select: { policyNumber: true } }, receipt: { select: { receiptNumber: true } } }, orderBy: [{ status: "asc" }, { createdAt: "asc" }] } },
-    }) : null,
-    db.bonusRun.findMany({ where: { organizationId: context.organizationId }, include: { seller: { select: { name: true } } }, orderBy: { updatedAt: "desc" }, take: 12 }),
-    db.maintenanceRun.findFirst({ where: { organizationId: context.organizationId, type: "BONUS_RUN_RETENTION" }, orderBy: { completedAt: "desc" } }),
-    db.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`,
-  ]));
+    }) : null;
+    const recentRuns = await db.bonusRun.findMany({ where: { organizationId: context.organizationId }, relationLoadStrategy: "join", include: { seller: { select: { name: true } } }, orderBy: { updatedAt: "desc" }, take: 12 });
+    const retentionStatus = await db.maintenanceRun.findFirst({ where: { organizationId: context.organizationId, type: "BONUS_RUN_RETENTION" }, orderBy: { completedAt: "desc" } });
+    const databaseClockRows = await db.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
+    return { sellers, run, recentRuns, retentionStatus, databaseClockRows };
+  });
   if (runId && !run) notFound();
   const program = run ? resolveBonusProgram(run.programKey) : null;
-  let snapshot: { input?: { damagePortfolioLossRatio?: number | null }; projection?: { reviewReasons?: string[]; eligibilityOutcome?: "ELIGIBLE" | "NOT_ELIGIBLE" | "PENDING_EVIDENCE"; items?: Array<{ evidence?: Record<string, unknown> }> } } = {};
+  let snapshot: { input?: { damagePortfolioLossRatio?: number | null; damagePortfolioLossRatioAsOf?: string | null; damagePortfolioLossRatioSource?: string | null }; projection?: { reviewReasons?: string[]; eligibilityOutcome?: "ELIGIBLE" | "NOT_ELIGIBLE" | "PENDING_EVIDENCE"; items?: Array<{ evidence?: Record<string, unknown> }> } } = {};
   if (run) {
     try { snapshot = JSON.parse(run.snapshotJson) as typeof snapshot; } catch { snapshot = {}; }
   }
@@ -85,9 +89,14 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             initialSellerId={run?.sellerId ?? sellers[0]?.id ?? ""}
             initialPeriodNumber={run?.periodNumber ?? 1}
             initialLossRatio={run?.programKey.startsWith("DAMAGE_") && snapshot.input?.damagePortfolioLossRatio !== null && snapshot.input?.damagePortfolioLossRatio !== undefined ? String(snapshot.input.damagePortfolioLossRatio * 100) : ""}
+            initialLossRatioAsOf={snapshot.input?.damagePortfolioLossRatioAsOf ?? ""}
+            initialLossRatioSource={snapshot.input?.damagePortfolioLossRatioSource ?? ""}
           />
           </div>
         </SectionCard>
+
+        {searchParamsResult.autosConfirmed !== undefined ? <p role="status" className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">Evidencia de Autos guardada para {Number(searchParamsResult.autosConfirmed) || 0} pólizas; {Number(searchParamsResult.autosExcluded) || 0} con 50 vehículos o más quedaron excluidas y {Number(searchParamsResult.autosPendingInventory) || 0} sin conteo respaldado siguen pendientes de revisión.</p> : null}
+        <AutoBonusEvidenceBatchForm sellers={sellers} />
 
       <SectionCard title="Proyecciones y cierres recientes" description="Todas las corridas, incluidos los cierres aprobados, se eliminan automáticamente cinco días después de su última actualización.">
         {recentRuns.length ? <details className="group" open={Boolean(runId)}>
@@ -112,7 +121,24 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
       </SectionCard>
 
         {run && program ? (
-        <SectionCard title={`${program.label} · ${run.seller.name}`} description={`2026 · ${bonusPeriodLabel(program, run.periodNumber)} · Estado: ${run.status === "APPROVED" ? "Aprobado" : run.status === "READY" ? "Listo para aprobar" : "Pendiente de revisión"}`} action={<ExportButtons exports={[{ name: "Detalle de bono", data: run.items.map((item) => ({
+        <SectionCard title={`${program.label} · ${run.seller.name}`} description={`2026 · ${bonusPeriodLabel(program, run.periodNumber)} · Estado: ${run.status === "APPROVED" ? "Aprobado" : run.status === "READY" ? "Listo para aprobar" : "Pendiente de revisión"}`} action={<div className="flex flex-wrap gap-2"><ExportButtons exports={[{ name: "Resumen del cierre", data: [{
+          "Programa": program.label,
+          "Vendedor": run.seller.name,
+          "Año": run.year,
+          "Periodo": bonusPeriodLabel(program, run.periodNumber),
+          "Estado": run.status,
+          "Prima neta computable MXN": toNumber(run.baseAmount).toFixed(2),
+          "Tasa": run.bonusRate === null ? "" : `${(toNumber(run.bonusRate) * 100).toFixed(2)}%`,
+          "Bono MXN": run.bonusAmount === null ? "" : toNumber(run.bonusAmount).toFixed(2),
+          "Aprobado por": run.approvedBy?.name ?? "",
+          "Fecha de aprobación": run.approvedAt?.toISOString() ?? "",
+          "Versión de cálculo": run.version,
+          "Versión de reglas": run.ruleSet.version,
+          "Archivo fuente": run.ruleSet.sourceFileName,
+          "SHA-256": run.ruleSet.sourceHash,
+          "Datos de entrada": JSON.stringify(snapshot.input ?? {}),
+          "Motivos de revisión": (snapshot.projection?.reviewReasons ?? []).join(" | "),
+        }] }, { name: "Detalle de bono", data: run.items.map((item) => ({
           "Estado": item.status === "INCLUDED" ? "Incluida" : item.status === "EXCLUDED" ? "Excluida" : "Revisión",
           "Fecha de pago": item.payment?.paidDate?.toISOString().slice(0, 10) ?? "",
           "Recibo": item.receipt?.receiptNumber ?? "",
@@ -122,7 +148,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
           "Importe elegible MXN": item.eligibleAmount === null ? "" : toNumber(item.eligibleAmount).toFixed(2),
           "Moneda": item.currency ?? "MXN",
           "Motivo": item.reason ?? "Criterios documentados",
-        })) }]} />}>
+          "Evidencia usada": item.evidenceJson,
+        })) }]} /><a href={`/api/bonuses/${encodeURIComponent(run.id)}/snapshot`} className="inline-flex h-9 items-center rounded-md border bg-card/70 px-3 text-sm font-medium hover:bg-muted">Snapshot JSON</a></div>}>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Prima neta computable (MXN)</p><p className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(toNumber(run.baseAmount), "MXN")}</p></div>
             <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Tasa estimada</p><p className="mt-1 text-xl font-semibold tabular-nums">{bonusRateLabel(program.eligibilityOnly, run.bonusRate, run.status)}</p></div>

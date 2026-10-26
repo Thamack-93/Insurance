@@ -21,6 +21,8 @@ export function BonusProjectionForm({
   initialSellerId,
   initialPeriodNumber,
   initialLossRatio,
+  initialLossRatioAsOf,
+  initialLossRatioSource,
 }: {
   programs: ProgramOption[];
   sellers: SellerOption[];
@@ -28,6 +30,8 @@ export function BonusProjectionForm({
   initialSellerId: string;
   initialPeriodNumber: number;
   initialLossRatio: string;
+  initialLossRatioAsOf: string;
+  initialLossRatioSource: string;
 }) {
   const [programKey, setProgramKey] = useState(initialProgramKey);
   const [periodNumber, setPeriodNumber] = useState(initialPeriodNumber);
@@ -82,11 +86,23 @@ export function BonusProjectionForm({
       </label>
 
       {isDamageProgram ? (
-        <label className="grid gap-1.5 text-sm sm:col-span-2 xl:col-span-2">
-          <span className="font-medium">Siniestralidad total de cartera Daños (%)</span>
-          <input name="damagePortfolioLossRatio" type="number" min="0" max="100" step="0.00000001" placeholder="Captura el dato del cierre de Daños" defaultValue={initialLossRatio} aria-describedby="bonus-loss-ratio-description" className="h-11 min-w-0 rounded-md border bg-background px-3" />
-          <span id="bonus-loss-ratio-description" className="text-xs leading-relaxed text-muted-foreground">Usa la cartera total del vendedor, todas las aseguradoras. Con 50% o más, el bono se excluye.</span>
-        </label>
+        <div className="grid gap-4 sm:col-span-2 xl:col-span-2">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-medium">Siniestralidad total de cartera Daños (%)</span>
+              <input name="damagePortfolioLossRatio" type="number" min="0" max="100" step="0.00000001" placeholder="Captura el dato del cierre de Daños" defaultValue={initialLossRatio} aria-describedby="bonus-loss-ratio-description" className="h-11 min-w-0 rounded-md border bg-background px-3" />
+            </label>
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-medium">Fecha de corte</span>
+              <input name="damagePortfolioLossRatioAsOf" type="date" defaultValue={initialLossRatioAsOf} className="h-11 min-w-0 rounded-md border bg-background px-3" />
+            </label>
+          </div>
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-medium">Fuente o referencia del dato</span>
+            <input name="damagePortfolioLossRatioSource" type="text" maxLength={500} placeholder="Reporte de siniestralidad de la cartera total" defaultValue={initialLossRatioSource} className="h-11 min-w-0 rounded-md border bg-background px-3" />
+          </label>
+          <span id="bonus-loss-ratio-description" className="text-xs leading-relaxed text-muted-foreground">Usa la cartera total del vendedor, todas las aseguradoras. Con 50% o más, el bono se excluye. Si falta el porcentaje, fecha o fuente, el cierre queda pendiente de revisión.</span>
+        </div>
       ) : null}
 
       <div className="flex flex-col gap-3 border-t pt-4 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between xl:col-span-4">

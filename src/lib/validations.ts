@@ -14,6 +14,7 @@ import {
   TASK_TYPES,
 } from "@/lib/domain-values";
 import { policyRiskDetailsSchema } from "@/lib/policy-risk-details";
+import { bonusEligibilityEvidenceSchema } from "@/lib/bonus-evidence";
 
 const optionalText = z.string().max(4000).optional().or(z.literal(""));
 const optionalEmail = z.string().email("Email invalido.").optional().or(z.literal(""));
@@ -120,10 +121,11 @@ const policyBaseSchema = z
     }
     if (values.bonusEligibilityJson) {
       try {
-        const evidence = JSON.parse(values.bonusEligibilityJson);
-        if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) throw new Error("not object");
+        const evidence = JSON.parse(values.bonusEligibilityJson) as unknown;
+        const result = bonusEligibilityEvidenceSchema.safeParse(evidence);
+        if (!result.success) throw new Error("invalid evidence");
       } catch {
-        context.addIssue({ code: "custom", path: ["bonusEligibilityJson"], message: "La evidencia de incentivos debe ser un objeto JSON válido." });
+        context.addIssue({ code: "custom", path: ["bonusEligibilityJson"], message: "Revisa los valores y tipos de la evidencia de incentivos." });
       }
     }
   });
