@@ -16,6 +16,7 @@ import {
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
 import { deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
+import { autoPolicyModeForCount, countInsuredVehicles } from "@/lib/auto-policy-mode";
 import { calculateCommissionEstimate, parseCommissionRules, roundMoney, shouldUseAggregatePolicyOverride, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
 
 type CommissionScope = {
@@ -133,9 +134,13 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
 
       const riskDetails = receipt.policy.riskDetails && typeof receipt.policy.riskDetails === "object" ? receipt.policy.riskDetails as Record<string, unknown> : {};
       const riskData = riskDetails.data && typeof riskDetails.data === "object" ? riskDetails.data as Record<string, unknown> : {};
-      const policyModeValue = typeof riskDetails.commissionPolicyMode === "string" && riskDetails.commissionPolicyMode.trim()
-        ? riskDetails.commissionPolicyMode
-        : receipt.policy.policyType === "AUTO" && typeof riskData.policyMode === "string" ? riskData.policyMode : "";
+      const assets = receipt.policy.insuredAssets;
+      const autoVehicleCount = assets.length || countInsuredVehicles(riskData.vehicles);
+      const policyModeValue = receipt.policy.policyType === "AUTO"
+        ? autoPolicyModeForCount(autoVehicleCount)
+        : typeof riskDetails.commissionPolicyMode === "string" && riskDetails.commissionPolicyMode.trim()
+          ? riskDetails.commissionPolicyMode
+          : "";
       const policyMode = policyModeValue.trim().toUpperCase();
       const policyUnitClass = typeof riskDetails.commissionUnitClass === "string" ? riskDetails.commissionUnitClass.trim().toUpperCase() : "";
       const productPlan = receipt.policy.paymentPlan?.trim().toUpperCase() || (typeof riskData.plan === "string" ? riskData.plan.trim().toUpperCase() : "") || "SIN_PLAN";
@@ -144,7 +149,6 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       // Commission reports are cut by the date the client paid. Use that same
       // date to select a rate for paid receipts; unpaid estimates use due date.
       const ruleDate = receipt.paidDate ?? receipt.dueDate;
-      const assets = receipt.policy.insuredAssets;
       const storedRows = jsonUnitBreakdown(receipt.premiumBreakdownByUnit);
       const aggregateComponents = premiumComponents(receipt);
       const aggregateNetPremium = deriveReceiptNetPremium({

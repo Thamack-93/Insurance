@@ -68,10 +68,6 @@ export function PolicyRiskDetailsFields({ policyType, value, onChange }: Props) 
   const collections = repeatedByType[policyType] ?? [];
   const normalizedValue = riskValue.policyType === policyType ? riskValue : emptyPolicyRiskDetails(policyType) as RiskValue;
   const displaySummary = summarizePolicyRiskDetails(normalizedValue);
-  const autoModeFromRisk = policyType === "AUTO" && typeof data.policyMode === "string" ? data.policyMode.trim() : "";
-  const commissionModeValue = normalizedValue.commissionPolicyMode?.trim() || autoModeFromRisk;
-  const commissionModeOption = ["INDIVIDUAL", "FLOTILLA"].includes(commissionModeValue.toUpperCase()) ? commissionModeValue.toUpperCase() : commissionModeValue;
-
   function addItem(key: string) {
     const items = Array.isArray(data[key]) ? data[key] as Item[] : [];
     onChange({ ...normalizedValue, version: 1, policyType, data: { ...data, [key]: [...items, { ...templates[key] }] } } as PolicyRiskDetails);
@@ -97,7 +93,7 @@ export function PolicyRiskDetailsFields({ policyType, value, onChange }: Props) 
   }
 
   return (
-    <FormSection title="Riesgo asegurado" description={policyType === "AUTO" ? "En una flotilla, registra cada vehículo por separado, selecciona Flotilla y clasifica cada unidad. Los datos se guardan estructurados para aplicar la tasa correcta por vehículo." : "Captura datos específicos del ramo. Los campos se guardan estructurados y generan la descripción de la póliza."}>
+    <FormSection title="Riesgo asegurado" description={policyType === "AUTO" ? "Registra cada vehículo asegurado por separado." : "Captura datos específicos del ramo. Los campos se guardan estructurados y generan la descripción de la póliza."}>
       {collections.map((key) => {
         const items = Array.isArray(data[key]) ? data[key] as Item[] : [];
         return (
@@ -141,12 +137,9 @@ export function PolicyRiskDetailsFields({ policyType, value, onChange }: Props) 
         </FormGrid>
       ) : null}
       <FormGrid>
-        <FormField label={policyType === "AUTO" ? "Modalidad de la póliza" : "Modalidad para comisión"} htmlFor={`risk-${policyType}-commission-mode`}>
-          {policyType === "AUTO" ? <select id={`risk-${policyType}-commission-mode`} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={commissionModeOption} onChange={(event) => changeCommissionField("commissionPolicyMode", event.target.value)}>
-            <option value="">Sin especificar</option><option value="INDIVIDUAL">Individual</option><option value="FLOTILLA">Flotilla</option>
-            {commissionModeOption && !["INDIVIDUAL", "FLOTILLA"].includes(commissionModeOption) ? <option value={commissionModeOption}>Valor anterior: {commissionModeOption}</option> : null}
-          </select> : <Input id={`risk-${policyType}-commission-mode`} value={normalizedValue.commissionPolicyMode ?? ""} onChange={(event) => changeCommissionField("commissionPolicyMode", event.target.value)} placeholder="Individual, colectiva, flotilla..." />}
-        </FormField>
+        {policyType !== "AUTO" ? <FormField label="Modalidad para comisión" htmlFor={`risk-${policyType}-commission-mode`}>
+          <Input id={`risk-${policyType}-commission-mode`} value={normalizedValue.commissionPolicyMode ?? ""} onChange={(event) => changeCommissionField("commissionPolicyMode", event.target.value)} placeholder="Individual, colectiva, flotilla..." />
+        </FormField> : null}
         <FormField label="Clase general para comisión" htmlFor={`risk-${policyType}-commission-class`}><Input id={`risk-${policyType}-commission-class`} value={normalizedValue.commissionUnitClass ?? ""} onChange={(event) => changeCommissionField("commissionUnitClass", event.target.value)} placeholder="Persona, inmueble, carga, riesgo empresarial..." /></FormField>
       </FormGrid>
       {policyType === "HOGAR" || policyType === "DANOS" || policyType === "EMPRESARIAL" ? <p className="text-xs text-muted-foreground">Puedes registrar varias ubicaciones o bienes asegurados.</p> : null}
