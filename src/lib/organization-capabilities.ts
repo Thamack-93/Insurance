@@ -160,6 +160,7 @@ async function resolveCapabilityWithClient(
   let organization: CapabilityOrganization | null;
   try {
     organization = await organizationDelegate.findUnique({
+      relationLoadStrategy: "join",
       where: { id: organizationId },
       select: {
         id: true,
