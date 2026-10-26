@@ -5,6 +5,7 @@ import {
   calculateCommissionEstimate,
   calculateOverdueStatus,
   getCommissionStatusFromReceipt,
+  shouldUseAggregatePolicyOverride,
 } from "./commissions.logic";
 
 describe("commissions.logic", () => {
@@ -52,6 +53,21 @@ describe("commissions.logic", () => {
     expect((truck.amount ?? 0) + (privateCar.amount ?? 0)).toBe(130);
     expect(calculateCommissionEstimate(null, [baseRule], dimensions, new Date("2026-06-01T12:00:00Z")).status).toBe("REVIEW");
     expect(calculateCommissionEstimate({ totalPremium: 100, iva: Number.NaN, issuanceExpense: 0, installmentSurcharge: 0, visibleDiscounts: 0 }, [baseRule], dimensions, new Date("2026-06-01T12:00:00Z")).status).toBe("REVIEW");
+  });
+
+  it("uses a complete receipt-level base for a multi-person policy with one policy-specific rate", () => {
+    const components = { totalPremium: 25011.92, iva: 3449.92, issuanceExpense: 1850, installmentSurcharge: 0, visibleDiscounts: 0 };
+    expect(shouldUseAggregatePolicyOverride({ hasInsuredAssets: true, policyRateOverride: 14.61, aggregateComponents: components, unitBreakdownCount: 0 })).toBe(true);
+    const result = calculateCommissionEstimate(components, [], { policyType: "GMM", productPlan: "FLEX PLUS", policyMode: "INDIVIDUAL", unitClass: "POLICY_OVERRIDE", paymentFrequency: "SINGLE" }, new Date("2026-03-23T12:00:00Z"), 14.61);
+    expect(result).toMatchObject({ status: "CALCULATED", netPremium: 19712, commissionableBase: 19712, rate: 14.61, amount: 2879.92, rule: { source: "POLICY_OVERRIDE" } });
+  });
+
+  it("keeps per-unit handling when a rate override is absent, inputs are incomplete, or unit rows exist", () => {
+    const components = { totalPremium: 1000, iva: 0, issuanceExpense: 0, installmentSurcharge: 0, visibleDiscounts: 0 };
+    expect(shouldUseAggregatePolicyOverride({ hasInsuredAssets: true, policyRateOverride: null, aggregateComponents: components, unitBreakdownCount: 0 })).toBe(false);
+    expect(shouldUseAggregatePolicyOverride({ hasInsuredAssets: true, policyRateOverride: 10, aggregateComponents: null, unitBreakdownCount: 0 })).toBe(false);
+    expect(shouldUseAggregatePolicyOverride({ hasInsuredAssets: true, policyRateOverride: 10, aggregateComponents: components, unitBreakdownCount: 2 })).toBe(false);
+    expect(shouldUseAggregatePolicyOverride({ hasInsuredAssets: false, policyRateOverride: 10, aggregateComponents: components, unitBreakdownCount: 0 })).toBe(false);
   });
 
   it("sets status to PENDING when receipt is PAID", () => {
