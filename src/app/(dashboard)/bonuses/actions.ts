@@ -252,7 +252,7 @@ export async function acceptBonusRunPolicyPremium(_previousState: BonusRunAction
       runId, expectedVersion, organizationId: context.organizationId, userId: context.userId, policyId,
     });
   });
-  if ("stale" in result) return STALE_BONUS_RUN_ACTION_STATE;
+  if (result.stale) return STALE_BONUS_RUN_ACTION_STATE;
   revalidatePath("/bonuses");
   redirect(`/bonuses?run=${encodeURIComponent(runId)}&premiumAccepted=${result.acceptedCount}`);
 }
@@ -271,7 +271,7 @@ export async function acceptBonusRunPremiumBatch(_previousState: BonusRunActionS
       runId, expectedVersion, organizationId: context.organizationId, userId: context.userId,
     });
   });
-  if ("stale" in result) return STALE_BONUS_RUN_ACTION_STATE;
+  if (result.stale) return STALE_BONUS_RUN_ACTION_STATE;
   revalidatePath("/bonuses");
   redirect(`/bonuses?run=${encodeURIComponent(runId)}&premiumAccepted=${result.acceptedCount}`);
 }

@@ -160,12 +160,13 @@ test.describe("Bonus review and approval", () => {
   });
 
   test("shows a reload action after a stale premium-review submission", async ({ page }) => {
-    const fixture = await createBonusFixture({ year: 2003, status: "REVIEW", itemReason: PREMIUM_REVIEW_REASON });
+    const fixture = await createBonusFixture({ year: 2003, status: "REVIEW", itemReason: PREMIUM_REVIEW_REASON, includePayment: true });
     try {
       await authenticatePageAsAdmin(page);
       await page.goto(`/bonuses?run=${encodeURIComponent(fixture.runId)}`);
       await getTestDb().bonusRun.update({ where: { id: fixture.runId }, data: { version: { increment: 1 } } });
 
+      await page.getByText("Revisar o aceptar por póliza").click();
       await page.getByLabel(/Acepto la prima neta derivada para esta póliza/).check();
       await page.getByRole("button", { name: "Hacer computables" }).click();
       await expect(page.locator("div[role=alert]").filter({ hasText: "La proyección cambió desde que la abriste" })).toBeVisible();
