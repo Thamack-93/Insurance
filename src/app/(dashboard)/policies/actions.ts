@@ -13,7 +13,7 @@ import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
-import { hasPolicyRiskData, policyInsuredObjectForSave, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
+import { hasPolicyRiskData, hasPolicyRiskInventoryData, policyInsuredObjectForSave, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 import { syncPolicyRiskRelations } from "@/lib/policy-risk-relations";
 import { findSerialRenewalCandidatesForTarget, syncSerialRenewalSuggestionsForTarget } from "@/lib/policy-renewal-match";
 
@@ -437,9 +437,9 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       });
       const submittedRiskDetails = policyRiskDetailsSchema.safeParse(parsed.data.riskDetails);
       if (submittedRiskDetails.success && (
-        hasPolicyRiskData(submittedRiskDetails.data) ||
+        hasPolicyRiskInventoryData(submittedRiskDetails.data) ||
         submittedRiskDetails.data.policyType !== previousPolicy.policyType ||
-        hasPolicyRiskData(previousPolicy.riskDetails)
+        hasPolicyRiskInventoryData(previousPolicy.riskDetails)
       )) {
         await syncPolicyRiskRelations(tx, context.organizationId, id, submittedRiskDetails.data);
       }
