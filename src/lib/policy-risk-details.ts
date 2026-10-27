@@ -110,9 +110,12 @@ export function hasPolicyRiskInventoryData(value: unknown): boolean {
 export function hasPolicyRiskData(value: unknown): boolean {
   const parsed = policyRiskDetailsSchema.safeParse(value);
   if (!parsed.success) return false;
+  const classification = parsed.data as unknown as Record<string, unknown>;
+  const policyMode = classification.commissionPolicyMode;
+  const unitClass = classification.commissionUnitClass;
   return hasPolicyRiskInventoryData(parsed.data)
-    || Boolean(parsed.data.commissionPolicyMode?.trim())
-    || Boolean(parsed.data.commissionUnitClass?.trim());
+    || (typeof policyMode === "string" && Boolean(policyMode.trim()))
+    || (typeof unitClass === "string" && Boolean(unitClass.trim()));
 }
 
 const detailLabels: Record<string, string> = {
