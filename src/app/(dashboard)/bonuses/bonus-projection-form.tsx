@@ -23,6 +23,8 @@ export function BonusProjectionForm({
   initialLossRatio,
   initialLossRatioAsOf,
   initialLossRatioSource,
+  demoMode,
+  demoLossRatioAsOf,
 }: {
   programs: ProgramOption[];
   sellers: SellerOption[];
@@ -32,6 +34,8 @@ export function BonusProjectionForm({
   initialLossRatio: string;
   initialLossRatioAsOf: string;
   initialLossRatioSource: string;
+  demoMode: boolean;
+  demoLossRatioAsOf: string;
 }) {
   const [programKey, setProgramKey] = useState(initialProgramKey);
   const [periodNumber, setPeriodNumber] = useState(initialPeriodNumber);
@@ -40,6 +44,9 @@ export function BonusProjectionForm({
   const periods = bonusPeriodOptions(program);
   const selectedPeriod = periods.find((period) => period.value === periodNumber) ?? periods[0];
   const isDamageProgram = program.key.startsWith("DAMAGE_");
+  const defaultLossRatio = demoMode ? "30" : "";
+  const defaultLossRatioAsOf = demoMode ? demoLossRatioAsOf : "";
+  const defaultLossRatioSource = demoMode ? "Dato sintético DEMO para probar la proyección; no usar en cierres reales." : "";
   const periodHint = program.period === "QUARTERLY" && program.accumulation === "YEAR_TO_DATE"
     ? "Autos acumula la prima desde enero hasta el corte. El cierre anual corresponde a T4."
     : program.period === "QUARTERLY"
@@ -90,18 +97,19 @@ export function BonusProjectionForm({
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1.5 text-sm">
               <span className="font-medium">Siniestralidad total de cartera Daños (%)</span>
-              <input name="damagePortfolioLossRatio" type="number" min="0" max="100" step="0.00000001" placeholder="Captura el dato del cierre de Daños" defaultValue={initialLossRatio} aria-describedby="bonus-loss-ratio-description" className="h-11 min-w-0 rounded-md border bg-background px-3" />
+              <input name="damagePortfolioLossRatio" type="number" min="0" max="100" step="0.00000001" placeholder="Captura el dato del cierre de Daños" defaultValue={initialLossRatio || defaultLossRatio} aria-describedby="bonus-loss-ratio-description" className="h-11 min-w-0 rounded-md border bg-background px-3" />
             </label>
             <label className="grid gap-1.5 text-sm">
               <span className="font-medium">Fecha de corte</span>
-              <input name="damagePortfolioLossRatioAsOf" type="date" defaultValue={initialLossRatioAsOf} className="h-11 min-w-0 rounded-md border bg-background px-3" />
+              <input name="damagePortfolioLossRatioAsOf" type="date" defaultValue={initialLossRatioAsOf || defaultLossRatioAsOf} className="h-11 min-w-0 rounded-md border bg-background px-3" />
             </label>
           </div>
           <label className="grid gap-1.5 text-sm">
             <span className="font-medium">Fuente o referencia del dato</span>
-            <input name="damagePortfolioLossRatioSource" type="text" maxLength={500} placeholder="Reporte de siniestralidad de la cartera total" defaultValue={initialLossRatioSource} className="h-11 min-w-0 rounded-md border bg-background px-3" />
+            <input name="damagePortfolioLossRatioSource" type="text" maxLength={500} placeholder="Reporte de siniestralidad de la cartera total" defaultValue={initialLossRatioSource || (demoMode ? defaultLossRatioSource : "")} className="h-11 min-w-0 rounded-md border bg-background px-3" />
           </label>
           <span id="bonus-loss-ratio-description" className="text-xs leading-relaxed text-muted-foreground">Usa la cartera total del vendedor, todas las aseguradoras. Con 50% o más, el bono se excluye. Si falta el porcentaje, fecha o fuente, el cierre queda pendiente de revisión.</span>
+          {demoMode ? <span className="text-xs text-amber-700 dark:text-amber-300">Valores sintéticos precargados para probar una DEMO. Sustitúyelos por evidencia real antes de usar un cierre fuera de pruebas.</span> : null}
         </div>
       ) : null}
 
