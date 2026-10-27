@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { policyRiskBackfillInputHash } from "@/lib/policy-risk-backfill-manifest";
-import { hasPolicyRiskData, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
+import { hasPolicyRiskInventoryData, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 
 export type PolicyRiskInventoryInput = {
   policyId: string;
@@ -120,7 +120,7 @@ function classify(row: PolicyRiskInventoryInput, outcome?: PolicyRiskInventoryOu
     if (!parsed.success) return { disposition: "DEFERRED", reason: "EXISTING_RISK_DETAILS_MALFORMED" };
     if (parsed.data.policyType !== row.policyType) return { disposition: "DEFERRED", reason: "EXISTING_RISK_DETAILS_POLICY_TYPE_MISMATCH" };
     if (row.riskDetailsReviewRequired) return { disposition: "DEFERRED", reason: "EXISTING_RISK_DETAILS_REVIEW_REQUIRED" };
-    if (!hasPolicyRiskData(parsed.data)) return { disposition: "DEFERRED", reason: "EXISTING_RISK_DETAILS_NO_MEANINGFUL_DATA" };
+    if (!hasPolicyRiskInventoryData(parsed.data)) return { disposition: "DEFERRED", reason: "EXISTING_RISK_DETAILS_NO_MEANINGFUL_DATA" };
     if (outcome?.outcome === "APPLIED" || outcome?.outcome === "ALREADY_APPLIED") return { disposition: "APPLIED", reason: `LINKED_APPLY_OUTCOME_${outcome.outcome}` };
     return { disposition: "ALREADY_STRUCTURED", reason: "RECOGNIZED_STRUCTURED_DATA_OPTIONAL_FIELDS_NOT_VERIFIED" };
   }
