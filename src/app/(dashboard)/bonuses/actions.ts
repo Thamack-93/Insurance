@@ -9,6 +9,7 @@ import { assertOrganizationContextInTransaction, requireOrganizationRole, withTe
 import { BONUS_RULE_SOURCE_HASH, resolveBonusProgram, selectBonusTier, type BonusProgram } from "@/lib/bonus-rules";
 import { calculateBonusProjection, decimalOrNull } from "@/lib/bonus-calculation";
 import { autoFleetEligibilityFromInventory, damagePortfolioLossRatioEvidenceSchema, parseBonusEligibilityEvidence, recordBonusEvidenceReview } from "@/lib/bonus-evidence";
+import { STALE_BONUS_RUN_ACTION_STATE, type BonusRunActionState, bonusApprovalBlockReason } from "@/lib/bonus-approval";
 
 function parseInput(formData: FormData) {
   const programKey = String(formData.get("programKey") ?? "");
@@ -236,7 +237,7 @@ export async function confirmAutoBonusEvidenceBatch(formData: FormData) {
  * unit-allocated net premium for one policy. This is a run snapshot override;
  * recalculating the run re-evaluates the source data and requires review again.
  */
-export async function acceptBonusRunPolicyPremium(formData: FormData) {
+export async function acceptBonusRunPolicyPremium(_previousState: BonusRunActionState, formData: FormData): Promise<BonusRunActionState> {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const runId = String(formData.get("runId") ?? "").trim();
   const policyId = String(formData.get("policyId") ?? "").trim();
@@ -245,17 +246,18 @@ export async function acceptBonusRunPolicyPremium(formData: FormData) {
     throw new Error("Confirma la revisión de prima y vuelve a abrir la proyección actualizada.");
   }
 
-  const acceptedCount = await withTenantTransaction(context, async (tx) => {
+  const result = await withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
     return acceptBonusRunPremiumItems(tx, {
       runId, expectedVersion, organizationId: context.organizationId, userId: context.userId, policyId,
     });
   });
+  if (result.stale) return STALE_BONUS_RUN_ACTION_STATE;
   revalidatePath("/bonuses");
-  redirect(`/bonuses?run=${encodeURIComponent(runId)}&premiumAccepted=${acceptedCount}`);
+  redirect(`/bonuses?run=${encodeURIComponent(runId)}&premiumAccepted=${result.acceptedCount}`);
 }
 
-export async function acceptBonusRunPremiumBatch(formData: FormData) {
+export async function acceptBonusRunPremiumBatch(_previousState: BonusRunActionState, formData: FormData): Promise<BonusRunActionState> {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const runId = String(formData.get("runId") ?? "").trim();
   const expectedVersion = Number(formData.get("version"));
@@ -263,14 +265,15 @@ export async function acceptBonusRunPremiumBatch(formData: FormData) {
     throw new Error("Confirma la aceptación de todas las PNP derivadas enumeradas.");
   }
 
-  const acceptedCount = await withTenantTransaction(context, async (tx) => {
+  const result = await withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
     return acceptBonusRunPremiumItems(tx, {
       runId, expectedVersion, organizationId: context.organizationId, userId: context.userId,
     });
   });
+  if (result.stale) return STALE_BONUS_RUN_ACTION_STATE;
   revalidatePath("/bonuses");
-  redirect(`/bonuses?run=${encodeURIComponent(runId)}&premiumAccepted=${acceptedCount}`);
+  redirect(`/bonuses?run=${encodeURIComponent(runId)}&premiumAccepted=${result.acceptedCount}`);
 }
 
 async function acceptBonusRunPremiumItems(
@@ -285,7 +288,7 @@ async function acceptBonusRunPremiumItems(
   });
   if (!run) throw new Error("El cierre no existe en esta organización.");
   if (run.status === "APPROVED") throw new Error("El cierre aprobado es inmutable.");
-  if (run.version !== expectedVersion) throw new Error("La proyección cambió desde que la abriste; vuelve a revisarla.");
+  if (run.version !== expectedVersion) return { stale: true as const };
 
   const reason = "PNP derivada del desglose por unidad; validar contra el recibo individual antes de aprobar.";
   const reviewItems = run.items.filter((item) => item.status === "REVIEW");
@@ -395,16 +398,16 @@ async function acceptBonusRunPremiumItems(
     },
     userId, db: tx,
   });
-  return targetItems.length;
+  return { stale: false as const, acceptedCount: targetItems.length };
 }
 
-export async function approveBonusRun(formData: FormData) {
+export async function approveBonusRun(_previousState: BonusRunActionState, formData: FormData): Promise<BonusRunActionState> {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const runId = String(formData.get("runId") ?? "");
   const expectedVersion = Number(formData.get("version") ?? 0);
   if (formData.get("reviewAttestation") !== "on") throw new Error("Confirma que revisaste el detalle del cierre antes de aprobarlo.");
   if (!runId || !Number.isInteger(expectedVersion) || expectedVersion < 1) throw new Error("Falta el cierre o su versión esperada.");
-  await withTenantTransaction(context, async (tx) => {
+  const stale = await withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
     await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "BonusRun" WHERE "id" = ${runId} AND "organizationId" = ${context.organizationId} FOR UPDATE`);
     const run = await tx.bonusRun.findFirst({
@@ -412,8 +415,11 @@ export async function approveBonusRun(formData: FormData) {
       include: { items: { select: { status: true } } },
     });
     if (!run) throw new Error("El cierre no existe en esta organización.");
-    if (run.version !== expectedVersion) throw new Error("La proyección cambió desde que se abrió; vuelve a revisarla antes de aprobar.");
-    if (run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")) throw new Error("Resuelve todas las partidas pendientes y vuelve a generar la proyección antes de aprobar.");
+    if (run.version !== expectedVersion) return true;
+    const blockReason = bonusApprovalBlockReason(run.status, run.items.map((item) => item.status));
+    if (blockReason === "APPROVED") throw new Error("El cierre aprobado es inmutable.");
+    if (blockReason === "EMPTY") throw new Error("No se puede aprobar una proyección sin pagos. Genera una proyección con partidas de pago antes de aprobar.");
+    if (blockReason === "NOT_READY") throw new Error("Resuelve todas las partidas pendientes y vuelve a generar la proyección antes de aprobar.");
     const periodCompleteOn = run.periodType === "QUARTERLY"
       ? new Date(Date.UTC(run.year, run.periodNumber * 3, 1))
       : new Date(Date.UTC(run.year + 1, 0, 1));
@@ -428,7 +434,9 @@ export async function approveBonusRun(formData: FormData) {
       newValue: { status: approved.status, approvedById: context.userId, approvedAt: approved.approvedAt, version: approved.version },
       userId: context.userId, db: tx,
     });
+    return false;
   });
+  if (stale) return STALE_BONUS_RUN_ACTION_STATE;
   revalidatePath("/bonuses");
   redirect(`/bonuses?run=${encodeURIComponent(runId)}`);
 }
