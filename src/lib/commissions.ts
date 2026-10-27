@@ -212,7 +212,8 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const canCalculateAggregateAssets = aggregateAssetEstimates.length === assets.length
         && aggregateAssetEstimates.length > 0
         && aggregateAssetEstimates.every(({ estimate }) => estimate.status === "CALCULATED" && estimate.amount !== undefined)
-        && new Set(aggregateRuleKeys).size === 1;
+        && new Set(aggregateRuleKeys).size === 1
+        && !singleUnitBreakdownConflicts;
       if (canCalculateAggregateAssets && aggregateComponents) {
         const first = aggregateAssetEstimates[0]!;
         calculations.push({
@@ -239,7 +240,9 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
         const calculationAssets = receipt.endorsementId
           ? assets.filter((asset) => byAsset.has(asset.id) && endorsementPartyIds?.has(asset.id))
           : assets;
-        if (aggregatePolicyOverride && aggregateComponents) {
+        if (singleUnitBreakdownConflicts) {
+          reviewReason = "El desglose del recibo y el desglose de su única unidad difieren; concílialos antes de calcular.";
+        } else if (aggregatePolicyOverride && aggregateComponents) {
           if (receipt.endorsementId && endorsementPartyIds?.size !== 1) {
             reviewReason = "El endoso no identifica con claridad a la persona cuyo importe se desglosa.";
           } else if (aggregateComponents.totalPremium <= 0) {
@@ -250,8 +253,6 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
             if (estimate.status !== "CALCULATED" || estimate.amount === undefined) reviewReason = estimate.reason ?? "Revisa los datos de comisión.";
             else calculations.push({ assetId: null, description: "Póliza (tasa específica)", unitClass, components: aggregateComponents, estimate: estimate as typeof calculations[number]["estimate"] });
           }
-        } else if (singleUnitBreakdownConflicts) {
-          reviewReason = "El desglose del recibo y el desglose de su única unidad difieren; concílialos antes de calcular.";
         } else if (deriveReceiptNetPremium({ amount: Number(receipt.amount), premiumBreakdownByUnit: rows }) === null) {
           reviewReason = "El desglose de prima por unidad está incompleto o no concilia con el importe del recibo.";
         } else if (receipt.endorsementId && (!endorsementPartyIds?.size || positiveEndorsementRows.length !== calculationAssets.length)) {
