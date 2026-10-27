@@ -640,8 +640,9 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
         }));
         const primary = documents.find((document) => document.kind === "policy") ?? documents[0];
         if (!primary) throw new Error("No encontramos una carátula principal para este grupo.");
+        const orderedDocuments = [primary, ...documents.filter((document) => document.id !== primary.id)];
         await analyzeSingleFile(files.find((file) => `${file.name}-${file.size}-${file.lastModified}` === primary.id) ?? files[0]!, {
-          combinedText: documents.map((document) => `\n--- ${document.fileName} (${document.kind}) ---\n${document.text}`).join("\n"),
+          combinedText: orderedDocuments.map((document) => `\n--- ${document.fileName} (${document.kind}) ---\n${document.text}`).join("\n"),
           relatedDocuments: documents.map((document) => ({ id: document.id, fileName: document.fileName, kind: document.kind, source: document.source, policyNumber: document.policyNumber, warnings: document.warnings })),
         });
         return;
@@ -1336,7 +1337,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                       placeholder="Selecciona una moneda"
                     />
                   </Field>
-                  <Field label="Plan de pago" confidence="medium">
+                  <Field label={draft.policyType === "AUTO" ? "Plan de cobertura" : "Plan de pago"} confidence="medium">
                     <Input
                       value={draft.paymentPlan ?? ""}
                       onChange={(event) => updateDraft({ paymentPlan: event.target.value || null })}
@@ -1618,23 +1619,27 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
 
               <Section title="Contenido" description="Datos complementarios que también se copiarán a la póliza nueva.">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Descripción original del riesgo" confidence="medium">
-                    <Textarea
-                      rows={3}
-                      value={draft.insuredObject ?? ""}
-                      readOnly
-                      className="max-h-32 overflow-y-auto"
-                    />
-                  </Field>
-                  <Field label="Beneficiarios" confidence="medium">
-                    <Textarea
-                      rows={3}
-                      value={draft.beneficiaryInfo ?? ""}
-                      onChange={(event) => updateDraft({ beneficiaryInfo: event.target.value || null })}
-                      readOnly={draft.policyType === "VIDA"}
-                      className="max-h-28 overflow-y-auto"
-                    />
-                  </Field>
+                  {draft.policyType !== "AUTO" ? (
+                    <Field label="Descripción original del riesgo" confidence="medium">
+                      <Textarea
+                        rows={3}
+                        value={draft.insuredObject ?? ""}
+                        readOnly
+                        className="max-h-32 overflow-y-auto"
+                      />
+                    </Field>
+                  ) : null}
+                  {draft.policyType !== "AUTO" ? (
+                    <Field label="Beneficiarios" confidence="medium">
+                      <Textarea
+                        rows={3}
+                        value={draft.beneficiaryInfo ?? ""}
+                        onChange={(event) => updateDraft({ beneficiaryInfo: event.target.value || null })}
+                        readOnly={draft.policyType === "VIDA"}
+                        className="max-h-28 overflow-y-auto"
+                      />
+                    </Field>
+                  ) : null}
                   <Field label="Notas" confidence="medium">
                     <Textarea
                       rows={4}

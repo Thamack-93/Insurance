@@ -1,7 +1,7 @@
 import { addMonths } from "date-fns";
 import type { SelectOption } from "@/lib/domain-options";
 import { normalizePolicyNumber } from "@/lib/policy-number";
-import { convertLegacyPolicyDescription, type PolicyRiskDetails } from "@/lib/policy-risk-details";
+import { convertLegacyPolicyDescription, policyRiskDetailsSchema, type PolicyRiskDetails } from "@/lib/policy-risk-details";
 
 export type PolicyPdfCaptureDraft = {
   policyNumber: string;
@@ -24,6 +24,7 @@ export type PolicyPdfCaptureDraft = {
   premiumIssuanceExpenseAmount?: number | null;
   premiumSurchargeAmount?: number | null;
   premiumDiscountAmount?: number | null;
+  receiptPlanAmounts?: number[];
   commissionRateOverride?: number | null;
   currency: string;
   requestNumber: string | null;
@@ -240,7 +241,7 @@ function buildSequentialReceiptNumbers(count: number) {
   return Array.from({ length: Math.max(1, count) }, (_, index) => String(index + 1));
 }
 
-export function buildPolicyPdfCaptureReceiptPlan(draft: PolicyPdfCaptureReceiptPlanDraft): PolicyPdfCaptureReceiptPlanItem[] {
+export function buildPolicyPdfCaptureReceiptPlan(draft: PolicyPdfCaptureReceiptPlanDraft, evidencedAmounts: number[] = []): PolicyPdfCaptureReceiptPlanItem[] {
   if (!draft.startDate || !draft.endDate) return [];
 
   const termCount = getReceiptPlanCount(draft.paymentFrequency);
@@ -248,6 +249,10 @@ export function buildPolicyPdfCaptureReceiptPlan(draft: PolicyPdfCaptureReceiptP
   const startDate = draft.startDate;
   const endDate = draft.endDate;
   const totalAmount = roundMoney(draft.premiumAmount);
+
+  const completeEvidencedSchedule = evidencedAmounts.length === termCount &&
+    evidencedAmounts.every((amount) => Number.isFinite(amount) && amount >= 0) &&
+    roundMoney(evidencedAmounts.reduce((sum, amount) => sum + amount, 0)) === totalAmount;
 
   if (receiptNumbers.length === 1) {
     return [
@@ -270,7 +275,9 @@ export function buildPolicyPdfCaptureReceiptPlan(draft: PolicyPdfCaptureReceiptP
   return receiptNumbers.map((receiptNumber, index) => {
     const isLast = index === receiptNumbers.length - 1;
     const nextStartDate = isLast ? endDate : addMonthsToIsoDate(currentStartDate, monthsPerTerm);
-    const amount = isLast ? roundMoney(remainingAmount) : baseAmount;
+    const amount = completeEvidencedSchedule
+      ? roundMoney(evidencedAmounts[index] ?? 0)
+      : isLast ? roundMoney(remainingAmount) : baseAmount;
     remainingAmount = roundMoney(remainingAmount - amount);
 
     const item = {
@@ -1078,7 +1085,22 @@ function getInsuredBlock(lines: string[]) {
 
 function parseClientAddress(lines: string[]): { value: string | null; confidence: FieldConfidence } {
   const block = getInsuredBlock(lines);
-  const addressValue = extractAddressFromBlock(block);
+  let addressValue = extractAddressFromBlock(block);
+  if (addressValue) {
+    const allText = compact(lines.join(" "));
+    const municipalityCandidates = [
+      ...allText.matchAll(/\bmunicipio\s*:\s*([^,]+?)(?=\s+(?:estado|colonia|vigencia|servicio|coberturas)\b|,|$)/gi),
+      ...allText.matchAll(/\bc\.?p\.?\s*:?\s*\d{5}\s+(?!municipio\b)([^,]+?)(?=,|\s+(?:forma de pago|plan|r\.f\.c\.)\b|$)/gi),
+    ].map((match) => compact(match[1] ?? "")).filter(Boolean);
+    const municipality = municipalityCandidates.sort((left, right) => right.length - left.length)[0];
+    const colonyCandidates = [
+      ...allText.matchAll(/\bcolonia\s*:\s*([^,]+?)(?=\s+(?:c\.?p\.?|municipio|estado|vigencia|servicio|coberturas)\b|,|$)/gi),
+      ...allText.matchAll(/\bcol\.?\s+([^,]+?)(?=\s+(?:c\.?p\.?|municipio|estado|vigencia|servicio|coberturas)\b|,|$)/gi),
+    ].map((match) => compact(match[1] ?? "")).filter(Boolean);
+    const colony = colonyCandidates.sort((left, right) => right.length - left.length)[0];
+    if (municipality) addressValue = addressValue.replace(/\bMunicipio\s+[^,]+?(?=\s+Estado\b|$)/i, `Municipio ${municipality}`);
+    if (colony) addressValue = addressValue.replace(/\bColonia\s+[^,]+?(?=\s+Estado\b|$)/i, `Colonia ${colony}`);
+  }
   if (addressValue) return { value: addressValue, confidence: "high" };
 
   return { value: null, confidence: "low" };
@@ -1128,6 +1150,48 @@ function parsePremiumAmount(lines: string[], fullText: string): { value: number;
   return amount !== null ? { value: amount, confidence: "medium" } : { value: 0, confidence: "low" };
 }
 
+function extractMoneyAfterLabel(text: string, label: RegExp) {
+  const match = text.match(label);
+  return match?.[1] ? parseMoney(match[1]) : null;
+}
+
+function parsePolicyPremiumBreakdown(text: string) {
+  const normalized = normalizeText(text);
+  const netPremium = extractMoneyAfterLabel(normalized, /prima\s+neta\s*\$?\s*([\d.,]+)/i);
+  const surcharge = extractMoneyAfterLabel(normalized, /(?:tasa\s+financiamiento|recargo\s+por\s+financiamiento|recargo\s+fraccionado)\s*\$?\s*([\d.,]+)/i);
+  const issuanceExpense = extractMoneyAfterLabel(normalized, /gastos\s+(?:por\s+)?expedici[oó]n\.?\s*\$?\s*(\d[\d.,]*)/i);
+  const subtotal = extractMoneyAfterLabel(normalized, /subtotal\s*\$?\s*([\d.,]+)/i);
+  const discount = netPremium !== null && surcharge !== null && issuanceExpense !== null && subtotal !== null
+    ? Math.round((netPremium + surcharge + issuanceExpense - subtotal) * 100) / 100
+    : null;
+  return {
+    premiumIssuanceExpenseAmount: issuanceExpense,
+    premiumSurchargeAmount: surcharge,
+    premiumDiscountAmount: discount !== null && discount >= 0 ? discount : null,
+  };
+}
+
+export function extractPolicyPdfReceiptAmounts(text: string) {
+  const normalized = normalizeText(text);
+  const sections = normalized.split(/aviso\s+de\s+cobro\s+de\s+primas\s+de\s+automoviles/g).slice(1);
+  const amounts = new Map<number, { amount: number; total: number }>();
+
+  for (const section of sections) {
+    const period = section.match(/serie\s+(\d{1,2})\s*\/\s*(\d{1,2})/i);
+    const amount = extractMoneyAfterLabel(section, /total\s+a\s+pagar[^$]{0,100}\$\s*([\d.,]+)/i);
+    if (!period || amount === null) continue;
+    const index = Number(period[1]);
+    const total = Number(period[2]);
+    if (index < 1 || index > total || !Number.isInteger(total)) continue;
+    amounts.set(index, { amount, total });
+  }
+
+  if (amounts.size === 0) return [];
+  const expectedCount = amounts.values().next().value?.total;
+  if (!expectedCount || amounts.size !== expectedCount || Array.from({ length: expectedCount }, (_, index) => amounts.has(index + 1)).some((present) => !present)) return [];
+  return Array.from({ length: expectedCount }, (_, index) => amounts.get(index + 1)!.amount);
+}
+
 function parseRequestNumber(text: string, policyNumber: string) {
   const lines = text
     .split(/\r?\n/)
@@ -1170,9 +1234,12 @@ function parseAutoInsuredObject(lines: string[]) {
 
   const headingIndex = lines.findIndex((line) => normalizeText(line).includes("descripcion del vehiculo asegurado"));
   if (headingIndex >= 0) {
-    const candidate = [lines[headingIndex + 1], lines[headingIndex + 2], lines[headingIndex + 3]]
-      .filter(Boolean)
-      .join(" ");
+    const candidateLines: string[] = [];
+    for (const line of lines.slice(headingIndex + 1, headingIndex + 4)) {
+      if (/^(?:tipo|modelo|serie|n[uú]mero de serie|motor|color|placas?|vigencia)\s*:/i.test(line)) break;
+      candidateLines.push(line);
+    }
+    const candidate = candidateLines.join(" ");
     if (candidate) return compact(candidate);
   }
 
@@ -1180,6 +1247,53 @@ function parseAutoInsuredObject(lines: string[]) {
     /[A-Z0-9].+\b(AUT\.?|AUTOMOVIL|CAMIONETA|SEDAN|SUV|PICKUP|VAN)\b/i.test(line),
   );
   return vehicleLine ? compact(vehicleLine) : null;
+}
+
+function parseAutoRiskDetails(description: string | null, lines: string[], serialNumber: string | null): PolicyRiskDetails | null {
+  if (!description) return null;
+  const normalizedText = normalizeText(lines.join(" "));
+  const type = normalizedText.match(/\btipo\s*:\s*(tractocamion|camion(?:eta)?|autobus|motocicleta|auto(?:movil)?|sedan)\b/i)?.[1] ?? "";
+  const unitClass = /tractocamion/i.test(type) ? "TRACTOCAMION"
+    : /camion/i.test(type) ? "CAMION_CARGA"
+      : /autobus/i.test(type) ? "AUTOBUS"
+        : /motocicleta/i.test(type) ? "MOTOCICLETA"
+          : /auto|automovil|sedan/i.test(type) ? "AUTO_PARTICULAR" : "";
+  const year = normalizedText.match(/\bmodelo\s*:\s*((?:19|20)\d{2})\b/i)?.[1] ?? "";
+  const plates = normalizedText.match(/\bplacas?\s*:\s*([a-z0-9-]{5,10})\b/i)?.[1]?.toUpperCase() ?? "";
+  const sourceDescription = compact(description).replace(/^\d{3,}\s*\([^)]*\)\s*[a-z]{1,5}\s*/i, "").replace(/[.\s]+$/, "");
+  const makerAndModel = sourceDescription.match(/\b(INTERNATIONAL|INTER[-\s]?NAVIS|FREIGHTLINER|KENWORTH|VOLVO|MACK|PETERBILT|FORD|CHEVROLET|NISSAN|TOYOTA)\s+([a-z0-9-]+)\s+(.+)$/i);
+  const make = makerAndModel
+    ? (/^inter(?:national|[-\s]?navis)?$/i.test(makerAndModel[1]) ? "International" : makerAndModel[1].toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase()))
+    : "";
+  const model = makerAndModel?.[2] ? makerAndModel[2].toUpperCase() : "";
+  const version = makerAndModel?.[3]?.trim() ?? "";
+  const parsed = policyRiskDetailsSchema.safeParse({
+    version: 1,
+    policyType: "AUTO",
+    sourceText: description,
+    commissionUnitClass: "",
+    data: {
+      vehicles: [{ make, model, year, version, vin: serialNumber ?? "", plates, unitClass }],
+    },
+  });
+  return parsed.success ? parsed.data : null;
+}
+
+function extractAutoSourceNotes(text: string) {
+  const source = compact(text);
+  const facts: string[] = [];
+  const capture = (pattern: RegExp) => source.match(pattern)?.[1]?.trim().replace(/[.;,]+$/, "") ?? "";
+  const use = capture(/\buso\s*:\s*([a-záéíóúüñ0-9 ]+?)(?=\s+(?:servicio|movimiento|plazo de pago|carga tipo|coberturas)\b)/i);
+  const service = capture(/\bservicio\s*:\s*([a-záéíóúüñ0-9. ()/-]+?)(?=\s+(?:movimiento|plazo de pago|carga tipo|coberturas)\b)/i);
+  const cargo = capture(/\bcarga\s+tipo\s*:\s*["']?([a-z0-9]+)["']?\s*([^\n]{0,50}?)(?=\s+(?:vigencia|coberturas)\b)/i);
+  const paymentTerm = capture(/\bplazo\s+de\s+pago\s*:\s*(\d+\s*d[ií]as?)\b/i);
+  const movement = capture(/\bmovimiento\s*:\s*([a-záéíóúüñ ]+?)(?=\s+(?:coberturas|prima neta|importe total)\b)/i);
+  if (use) facts.push(`Uso ${use}`);
+  if (service) facts.push(`Servicio ${service}`);
+  if (cargo) facts.push(`Carga tipo ${cargo.replace(/\s*:\s*/g, ": ")}`);
+  if (paymentTerm) facts.push(`Plazo de pago ${paymentTerm}`);
+  if (movement) facts.push(`Movimiento ${movement}`);
+  return facts;
 }
 
 function parsePolicyType(lines: string[], fullText: string): string {
@@ -1333,7 +1447,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
         (normalizedFullText.includes("anual") ? "Anual" : ""),
     );
   })();
-  const paymentPlan = extractInlineValue(lines, ["Plan de pago"]) ?? null;
+  const paymentPlan = extractInlineValue(lines, ["Plan de pago", "Plan"]) ?? null;
   const requestNumber = parseRequestNumber(text, policyNumber);
 
   const startDate =
@@ -1375,13 +1489,23 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
       ? null
       : extractInlineValue(lines, ["Objeto asegurado", "Bien asegurado"]) ??
         (policyType === "AUTO" ? parseAutoInsuredObject(lines) : null);
-  const riskDetails = convertLegacyPolicyDescription(policyType, insuredObject, serialNumber).riskDetails;
+  const legacyRiskConversion = convertLegacyPolicyDescription(policyType, insuredObject, serialNumber);
+  const riskDetails = policyType === "AUTO"
+    ? legacyRiskConversion.status === "CONVERTED"
+      ? legacyRiskConversion.riskDetails
+      : parseAutoRiskDetails(insuredObject, lines, serialNumber) ?? legacyRiskConversion.riskDetails
+    : legacyRiskConversion.riskDetails;
   const beneficiaryCandidate = extractInlineValue(lines, ["Beneficiarios", "Beneficiario"]);
   const beneficiaryInfo =
     beneficiaryCandidate && beneficiaryCandidate.length <= 180 && !/^[\W_]+$/.test(beneficiaryCandidate) && !/^(en nuestra|nuestra|coberturas|condiciones|pol[ií]za|seguros)/i.test(beneficiaryCandidate)
       ? beneficiaryCandidate
       : null;
-  const notes = [requestNumber ? `Solicitud ${requestNumber}` : null, issueDate ? `Emisión ${issueDate}` : null]
+  const premiumBreakdown = parsePolicyPremiumBreakdown(text);
+  const notes = [
+    requestNumber ? `Solicitud ${requestNumber}` : null,
+    issueDate ? `Emisión ${issueDate}` : null,
+    ...(policyType === "AUTO" ? extractAutoSourceNotes(fullText) : []),
+  ]
     .filter(Boolean)
     .join(" · ") || null;
 
@@ -1403,6 +1527,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     paymentFrequency,
     paymentPlan,
     premiumAmount: premiumResult.value,
+    ...premiumBreakdown,
     commissionRateOverride: null,
     currency: "MXN",
     requestNumber,
@@ -1411,6 +1536,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     beneficiaryInfo,
     notes,
     sourcePolicyNumber: parseSourcePolicyNumber(lines, fullText, policyNumber),
+    receiptPlanAmounts: extractPolicyPdfReceiptAmounts(text),
   };
 }
 
