@@ -16,6 +16,7 @@ import { BonusProjectionForm } from "./bonus-projection-form";
 import { BonusRunItemsTable } from "./bonus-run-items-table";
 import { AutoBonusEvidenceBatchForm } from "./auto-bonus-evidence-batch-form";
 import { ChevronDown } from "lucide-react";
+import { getBusinessDateKey } from "@/lib/business-dates";
 
 function bonusAmountLabel(eligibilityOnly: boolean | undefined, amount: unknown, status: string) {
   if (eligibilityOnly) return "Solo elegibilidad";
@@ -34,7 +35,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
   const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const searchParamsResult = (await searchParams) ?? {};
   const runId = searchParamsResult.run;
-  const { sellers, run, recentRuns, retentionStatus, databaseClockRows } = await withTenantTransaction(context, async (db) => {
+  const { sellers, run, recentRuns, retentionStatus, databaseClockRows, demoMode } = await withTenantTransaction(context, async (db) => {
+    const organization = await db.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } });
     const sellers = await db.user.findMany({
       where: { active: true, organizationMemberships: { some: { organizationId: context.organizationId, active: true } } },
       select: { id: true, name: true, email: true }, orderBy: { name: "asc" },
@@ -47,7 +49,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
     const recentRuns = await db.bonusRun.findMany({ where: { organizationId: context.organizationId }, relationLoadStrategy: "join", include: { seller: { select: { name: true } } }, orderBy: { updatedAt: "desc" }, take: 12 });
     const retentionStatus = await db.maintenanceRun.findFirst({ where: { organizationId: context.organizationId, type: "BONUS_RUN_RETENTION" }, orderBy: { completedAt: "desc" } });
     const databaseClockRows = await db.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
-    return { sellers, run, recentRuns, retentionStatus, databaseClockRows };
+    return { sellers, run, recentRuns, retentionStatus, databaseClockRows, demoMode: organization?.kind === "DEMO" };
   });
   if (runId && !run) notFound();
   const program = run ? resolveBonusProgram(run.programKey) : null;
@@ -124,6 +126,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             initialLossRatio={run?.programKey.startsWith("DAMAGE_") && snapshot.input?.damagePortfolioLossRatio !== null && snapshot.input?.damagePortfolioLossRatio !== undefined ? String(snapshot.input.damagePortfolioLossRatio * 100) : ""}
             initialLossRatioAsOf={snapshot.input?.damagePortfolioLossRatioAsOf ?? ""}
             initialLossRatioSource={snapshot.input?.damagePortfolioLossRatioSource ?? ""}
+            demoMode={demoMode}
+            demoLossRatioAsOf={getBusinessDateKey(new Date())}
           />
           </div>
         </SectionCard>
