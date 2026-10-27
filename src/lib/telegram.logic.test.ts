@@ -41,7 +41,7 @@ import {
 } from "./qualitas-payment-link";
 
 describe("telegram.shared", () => {
-  it("adds the collections action to the summary and uses a 30-day renewal window label", () => {
+  it("keeps an empty daily digest concise and links to collections", () => {
     const empty = { total: 0, items: [] };
     const messages = buildTelegramDailyDigestMessages({
       dayStart: new Date("2026-08-31T06:00:00.000Z"),
@@ -51,14 +51,14 @@ describe("telegram.shared", () => {
       upcomingReceipts: empty,
       upcomingRenewals: empty,
       pendingWorkItems: empty as never,
-      commissions: empty,
     });
 
-    expect(messages[0]?.body).toContain("Renovaciones 30 días: 0 pólizas");
+    expect(messages[0]?.body).toContain("Sin pendientes urgentes ni próximos.");
+    expect(messages).toHaveLength(1);
+    expect(messages.map(({ body }) => body).join("\n")).not.toMatch(/comision/i);
     expect(messages[0]?.replyMarkup).toEqual({
-      inline_keyboard: [[{ text: "Gestionar cobros", callback_data: "digest_manage_receipts" }]],
+      inline_keyboard: [[{ text: "Ver cobros", callback_data: "digest_manage_receipts" }]],
     });
-    expect(messages.slice(1).every((message) => !message.replyMarkup)).toBe(true);
   });
 
   it("generates a readable hex link code", () => {

@@ -137,18 +137,10 @@ type TelegramRenewalItem = {
   insurerName: string;
   endDate: Date;
 };
-type TelegramDigestCommissionItem = {
-  id: string;
-  clientName: string;
-  policyNumber: string | null;
-  insurerName: string;
-  expectedDate: Date | null;
-  amount: number;
-  currency: string;
-};
 type TelegramListResult<T> = {
   total: number;
   items: T[];
+  balanceTotalsByCurrency?: Record<string, number>;
 };
 
 type TelegramDigestMessagePart = {
@@ -1486,9 +1478,20 @@ async function getTelegramReceipts(input: {
     return !isPaidWithinTolerance(amount, paidAmount);
   });
   const pagedRows = eligibleRows.slice(input.skip ?? 0, (input.skip ?? 0) + input.limit);
+  const balanceTotalsByCurrency: Record<string, number> = {};
+
+  for (const row of eligibleRows) {
+    const amountInCents = Math.round(toNumber(row.amount) * 100);
+    const paidInCents = Math.round(row.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0) * 100);
+    const balanceInCents = isPaidWithinTolerance(amountInCents / 100, paidInCents / 100)
+      ? 0
+      : Math.max(amountInCents - paidInCents, 0);
+    balanceTotalsByCurrency[row.currency] = (balanceTotalsByCurrency[row.currency] ?? 0) + balanceInCents / 100;
+  }
 
   return {
     total: eligibleRows.length,
+    balanceTotalsByCurrency,
     items: pagedRows.map((row) => {
       const amount = toNumber(row.amount);
       const paidAmount = row.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
@@ -1578,6 +1581,24 @@ function formatTelegramReceiptLine(item: TelegramReceiptItem, timeZone = DEFAULT
   ].join("\n");
 }
 
+function formatTelegramDigestReceiptLine(item: TelegramReceiptItem, timeZone = DEFAULT_TIMEZONE) {
+  const diff = daysUntil(item.dueDate);
+  const dueLabel =
+    diff < 0
+      ? `vencido hace ${Math.abs(diff)} días`
+      : diff === 0
+        ? "vence hoy"
+        : `vence en ${diff} días`;
+  const link = buildPolicyDeskUrl(`/receipts/${item.id}`);
+  return [
+    `• ${item.clientName}`,
+    `  Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  Recibo ${item.receiptNumber} · ${dueLabel} · ${formatTelegramDate(item.dueDate, timeZone)}`,
+    `  Saldo pendiente: ${formatCurrency(Math.max(item.balance, 0), item.currency)}`,
+    link ? `  Abrir recibo: ${link}` : null,
+  ].filter(Boolean).join("\n");
+}
+
 function formatTelegramRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
   const diff = daysUntil(item.endDate);
   const renewalLabel =
@@ -1586,15 +1607,28 @@ function formatTelegramRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT
       : diff === 0
         ? "vence hoy"
         : `vence en ${diff} días`;
-
   return [
     `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
     `  ${formatTelegramDate(item.endDate, timeZone)} · ${renewalLabel}`,
   ].join("\n");
 }
 
-function formatTelegramCommissionLine(item: TelegramDigestCommissionItem, timeZone = DEFAULT_TIMEZONE) {
-  return `• ${item.clientName} · ${item.policyNumber ?? "Sin póliza"} · ${item.insurerName}\n  ${item.expectedDate ? formatTelegramDate(item.expectedDate, timeZone) : "Sin fecha"} · ${formatCurrency(item.amount, item.currency)}`;
+function formatTelegramDigestRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
+  const diff = daysUntil(item.endDate);
+  const renewalLabel =
+    diff < 0
+      ? `vencida hace ${Math.abs(diff)} días`
+      : diff === 0
+        ? "vence hoy"
+        : `vence en ${diff} días`;
+  const link = buildPolicyDeskUrl(`/policies/${item.id}`);
+
+  return [
+    `• ${item.clientName}`,
+    `  Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  Vence ${renewalLabel} · ${formatTelegramDate(item.endDate, timeZone)}`,
+    link ? `  Abrir póliza: ${link}` : null,
+  ].filter(Boolean).join("\n");
 }
 
 function buildTelegramSection(input: {
@@ -1604,7 +1638,14 @@ function buildTelegramSection(input: {
   emptyText: string;
   page?: number;
   totalPages?: number;
+  itemSeparator?: string;
 }) {
+  if (input.itemSeparator) {
+    const heading = `${input.title} (${input.total})${input.lines.length < input.total && input.total > 0 ? ` · mostrando ${input.lines.length}` : ""}${input.page && input.totalPages ? ` · página ${input.page}/${input.totalPages}` : ""}`;
+    const lines = input.lines.length > 0 ? input.lines : [input.emptyText];
+    return `${heading}\n${lines.join(input.itemSeparator)}`;
+  }
+
   return [
     `${input.title}: ${input.total}${input.page && input.totalPages ? ` · página ${input.page}/${input.totalPages}` : ""}`,
     ...(input.lines.length > 0 ? input.lines : [input.emptyText]),
@@ -1704,6 +1745,17 @@ function getTelegramSummaryLabel(total: number, suffix: string) {
   return total === 1 ? `1 ${suffix}` : `${total} ${suffix}s`;
 }
 
+function formatTelegramDigestDate(date: Date, timeZone: string) {
+  const formatted = new Intl.DateTimeFormat("es-MX", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone,
+  }).format(date);
+  return formatted.charAt(0).toLocaleUpperCase("es-MX") + formatted.slice(1);
+}
+
 function formatTelegramDigestSummary(input: {
   dayStart: Date;
   timeZone: string;
@@ -1712,18 +1764,33 @@ function formatTelegramDigestSummary(input: {
   upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
   pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
-  commissions: TelegramListResult<TelegramDigestCommissionItem>;
 }) {
+  const attention = [
+    input.overdueReceipts.total > 0 ? `• Cobros vencidos: ${getTelegramSummaryLabel(input.overdueReceipts.total, "recibo")}` : null,
+    input.todayReceipts.total > 0 ? `• Vencen hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}` : null,
+    input.pendingWorkItems.total > 0 ? `• Tareas vencidas: ${getTelegramSummaryLabel(input.pendingWorkItems.total, "tarea")}` : null,
+  ].filter((line): line is string => line !== null);
+  const upcoming = [
+    input.upcomingReceipts.total > 0 ? `• Cobros próximos (14 días): ${getTelegramSummaryLabel(input.upcomingReceipts.total, "recibo")}` : null,
+    input.upcomingRenewals.total > 0 ? `• Renovaciones (30 días): ${getTelegramSummaryLabel(input.upcomingRenewals.total, "póliza")}` : null,
+  ].filter((line): line is string => line !== null);
+  const balanceTotals = new Map<string, number>();
+  for (const receipts of [input.overdueReceipts, input.todayReceipts, input.upcomingReceipts]) {
+    for (const [currency, amount] of Object.entries(receipts.balanceTotalsByCurrency ?? {})) {
+      balanceTotals.set(currency, (balanceTotals.get(currency) ?? 0) + amount);
+    }
+  }
+  const balanceLines = [...balanceTotals.entries()]
+    .filter(([, amount]) => amount > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, amount]) => `• ${formatCurrency(amount, currency)}`);
+
   return [
-    "Resumen diario PolicyDesk",
-    `Fecha: ${formatTelegramDate(input.dayStart, input.timeZone)}`,
-    "",
-    `Vencidos: ${getTelegramSummaryLabel(input.overdueReceipts.total, "recibo")}`,
-    `Hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}`,
-    `Próximos 14 días: ${getTelegramSummaryLabel(input.upcomingReceipts.total, "recibo")}`,
-    `Renovaciones 30 días: ${getTelegramSummaryLabel(input.upcomingRenewals.total, "póliza")}`,
-    `Pendientes atrasados: ${getTelegramSummaryLabel(input.pendingWorkItems.total, "tarea")}`,
-    `Comisiones por revisar: ${getTelegramSummaryLabel(input.commissions.total, "comisión")}`,
+    `📋 Resumen diario · ${formatTelegramDigestDate(input.dayStart, input.timeZone)}`,
+    ...(attention.length > 0 ? ["", "🔴 Para atender", ...attention] : []),
+    ...(upcoming.length > 0 ? ["", "📅 Próximamente", ...upcoming] : []),
+    ...(balanceLines.length > 0 ? ["", "💰 Saldo por cobrar · vencidos, hoy y próximos 14 días", ...balanceLines] : []),
+    ...(attention.length === 0 && upcoming.length === 0 ? ["", "✅ Sin pendientes urgentes ni próximos."] : []),
   ].join("\n");
 }
 
@@ -1734,48 +1801,19 @@ function formatTelegramDigestDetailLines(input: {
   upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
   pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
-  commissions: TelegramListResult<TelegramDigestCommissionItem>;
 }) {
-  const sections = [
-    buildTelegramSection({
-      title: "Recibos vencidos",
-      total: input.overdueReceipts.total,
-      lines: input.overdueReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone)),
-      emptyText: "Sin recibos vencidos.",
-    }),
-    buildTelegramSection({
-      title: "Recibos de hoy",
-      total: input.todayReceipts.total,
-      lines: input.todayReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone)),
-      emptyText: "Sin recibos pendientes para hoy.",
-    }),
-    buildTelegramSection({
-      title: "Recibos próximos 14 días",
-      total: input.upcomingReceipts.total,
-      lines: input.upcomingReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone)),
-      emptyText: "Sin recibos próximos.",
-    }),
-    buildTelegramSection({
-      title: "Renovaciones próximas 30 días",
-      total: input.upcomingRenewals.total,
-      lines: input.upcomingRenewals.items.map((item) => formatTelegramRenewalLine(item, input.timeZone)),
-      emptyText: "Sin renovaciones próximas.",
-    }),
-    buildTelegramSection({
-      title: "Pendientes atrasados",
-      total: input.pendingWorkItems.total,
-      lines: input.pendingWorkItems.items.map((item) => formatTelegramTaskLine(item)),
-      emptyText: "Sin tareas atrasadas.",
-    }),
-    buildTelegramSection({
-      title: "Comisiones por revisar",
-      total: input.commissions.total,
-      lines: input.commissions.items.map((item) => formatTelegramCommissionLine(item, input.timeZone)),
-      emptyText: "Sin comisiones por revisar.",
-    }),
-  ];
+  const section = (title: string, total: number, lines: string[]) =>
+    total > 0
+      ? buildTelegramSection({ title, total, lines, emptyText: "", itemSeparator: "\n\n" })
+      : null;
 
-  return sections;
+  return [
+    section("🔴 Cobros vencidos", input.overdueReceipts.total, input.overdueReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
+    section("📍 Recibos que vencen hoy", input.todayReceipts.total, input.todayReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
+    section("⏰ Tareas vencidas", input.pendingWorkItems.total, input.pendingWorkItems.items.map((item) => formatTelegramTaskLine(item))),
+    section("🧾 Cobros próximos · 14 días", input.upcomingReceipts.total, input.upcomingReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
+    section("🔄 Renovaciones · 30 días", input.upcomingRenewals.total, input.upcomingRenewals.items.map((item) => formatTelegramDigestRenewalLine(item, input.timeZone))),
+  ].filter((value): value is string => value !== null);
 }
 
 export function buildTelegramDailyDigestMessages(input: {
@@ -1786,7 +1824,6 @@ export function buildTelegramDailyDigestMessages(input: {
   upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
   pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
-  commissions: TelegramListResult<TelegramDigestCommissionItem>;
 }): TelegramDigestMessagePart[] {
   const summary = formatTelegramDigestSummary(input);
   const detailLines = formatTelegramDigestDetailLines(input).flatMap((block, index) =>
@@ -1799,7 +1836,7 @@ export function buildTelegramDailyDigestMessages(input: {
       title: "Resumen diario PolicyDesk",
       body: summary,
       replyMarkup: {
-        inline_keyboard: [[{ text: "Gestionar cobros", callback_data: DIGEST_MANAGE_CALLBACK }]],
+        inline_keyboard: [[{ text: "Ver cobros", callback_data: DIGEST_MANAGE_CALLBACK }]],
       },
     },
     ...detailMessages.map((body, index) => ({
@@ -2065,7 +2102,17 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
   const tomorrowStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
   const upcomingEnd = new Date(dayStart.getTime() + 14 * 24 * 60 * 60 * 1000 - 1);
   const renewalEnd = new Date(dayStart.getTime() + 30 * 24 * 60 * 60 * 1000 - 1);
-  const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals, pendingRows, commissionRows] = await Promise.all([
+  const overdueTasksFrom = new Date(0);
+  const overdueTasksTo = businessAddDays(dayStart, -1);
+  const taskFilters = {
+    organizationId,
+    workItemTypes: ["TASK"],
+    statuses: OPEN_WORK_ITEM_STATUSES,
+    from: overdueTasksFrom,
+    to: overdueTasksTo,
+    portfolioOwnerId: userId,
+  } as const;
+  const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals, overdueTaskRows, overdueTaskTotal] = await Promise.all([
     getTelegramReceipts({
       userId,
       to: new Date(dayStart.getTime() - 1),
@@ -2093,32 +2140,17 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
       limit: TELEGRAM_DIGEST_SECTION_LIMIT,
       client,
     }),
-    getOpenWorkItems({ organizationId, to: dayStart, limit: TELEGRAM_DIGEST_SECTION_LIMIT, portfolioOwnerId: userId, client: db as TenantDb }),
-    db.commission.findMany({
-      where: {
-        organizationId,
-        client: { portfolioOwnerId: userId },
-        expectedDate: { gte: dayStart, lte: new Date(dayStart.getTime() + 30 * 24 * 60 * 60 * 1000) },
-        status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
-      },
-      include: { client: { select: { fullName: true } }, policy: { select: { policyNumber: true } }, insurer: { select: { name: true } } },
-      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
-      take: TELEGRAM_DIGEST_SECTION_LIMIT,
+    getOpenWorkItems({
+      organizationId,
+      from: overdueTasksFrom,
+      to: overdueTasksTo,
+      statuses: [...OPEN_WORK_ITEM_STATUSES],
+      limit: TELEGRAM_DIGEST_SECTION_LIMIT,
+      portfolioOwnerId: userId,
+      client: db as TenantDb,
     }),
+    countWorkItems(taskFilters, db as TenantDb),
   ]);
-
-  const commissions: TelegramListResult<TelegramDigestCommissionItem> = {
-    total: commissionRows.length,
-    items: commissionRows.map((row) => ({
-      id: row.id,
-      clientName: row.client.fullName,
-      policyNumber: row.policy?.policyNumber ?? null,
-      insurerName: row.insurer.name,
-      expectedDate: row.expectedDate,
-      amount: toNumber(row.actualAmount ?? row.expectedAmount),
-      currency: "MXN",
-    })),
-  };
 
   return buildTelegramDailyDigestMessages({
     dayStart,
@@ -2127,8 +2159,7 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
     todayReceipts,
     upcomingReceipts,
     upcomingRenewals,
-    pendingWorkItems: { total: pendingRows.length, items: pendingRows },
-    commissions,
+    pendingWorkItems: { total: overdueTaskTotal, items: overdueTaskRows },
   });
 }
 
