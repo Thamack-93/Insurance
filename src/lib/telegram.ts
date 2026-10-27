@@ -1568,6 +1568,27 @@ function formatTelegramReceiptLine(item: TelegramReceiptItem, timeZone = DEFAULT
       : diff === 0
         ? "vence hoy"
         : `vence en ${diff} días`;
+  const balanceLabel =
+    item.balance <= 0
+      ? "pagado"
+      : item.balance >= item.amount
+        ? `por cobrar ${formatCurrency(item.balance, item.currency)}`
+        : `saldo ${formatCurrency(item.balance, item.currency)} de ${formatCurrency(item.amount, item.currency)}`;
+
+  return [
+    `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  Recibo ${item.receiptNumber} · ${formatTelegramDate(item.dueDate, timeZone)} · ${dueLabel} · ${balanceLabel}`,
+  ].join("\n");
+}
+
+function formatTelegramDigestReceiptLine(item: TelegramReceiptItem, timeZone = DEFAULT_TIMEZONE) {
+  const diff = daysUntil(item.dueDate);
+  const dueLabel =
+    diff < 0
+      ? `vencido hace ${Math.abs(diff)} días`
+      : diff === 0
+        ? "vence hoy"
+        : `vence en ${diff} días`;
   const link = buildPolicyDeskUrl(`/receipts/${item.id}`);
   return [
     `• ${item.clientName}`,
@@ -1579,6 +1600,20 @@ function formatTelegramReceiptLine(item: TelegramReceiptItem, timeZone = DEFAULT
 }
 
 function formatTelegramRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
+  const diff = daysUntil(item.endDate);
+  const renewalLabel =
+    diff < 0
+      ? `vencida hace ${Math.abs(diff)} días`
+      : diff === 0
+        ? "vence hoy"
+        : `vence en ${diff} días`;
+  return [
+    `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  ${formatTelegramDate(item.endDate, timeZone)} · ${renewalLabel}`,
+  ].join("\n");
+}
+
+function formatTelegramDigestRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
   const diff = daysUntil(item.endDate);
   const renewalLabel =
     diff < 0
@@ -1773,11 +1808,11 @@ function formatTelegramDigestDetailLines(input: {
       : null;
 
   return [
-    section("🔴 Cobros vencidos", input.overdueReceipts.total, input.overdueReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone))),
-    section("📍 Recibos que vencen hoy", input.todayReceipts.total, input.todayReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone))),
+    section("🔴 Cobros vencidos", input.overdueReceipts.total, input.overdueReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
+    section("📍 Recibos que vencen hoy", input.todayReceipts.total, input.todayReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
     section("⏰ Tareas vencidas", input.pendingWorkItems.total, input.pendingWorkItems.items.map((item) => formatTelegramTaskLine(item))),
-    section("🧾 Cobros próximos · 14 días", input.upcomingReceipts.total, input.upcomingReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone))),
-    section("🔄 Renovaciones · 30 días", input.upcomingRenewals.total, input.upcomingRenewals.items.map((item) => formatTelegramRenewalLine(item, input.timeZone))),
+    section("🧾 Cobros próximos · 14 días", input.upcomingReceipts.total, input.upcomingReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
+    section("🔄 Renovaciones · 30 días", input.upcomingRenewals.total, input.upcomingRenewals.items.map((item) => formatTelegramDigestRenewalLine(item, input.timeZone))),
   ].filter((value): value is string => value !== null);
 }
 
