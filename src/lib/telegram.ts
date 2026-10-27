@@ -1592,7 +1592,7 @@ function formatTelegramDigestReceiptLine(item: TelegramReceiptItem, timeZone = D
   const link = buildPolicyDeskUrl(`/receipts/${item.id}`);
   return [
     `• ${item.clientName}`,
-    `  Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
     `  Recibo ${item.receiptNumber} · ${dueLabel} · ${formatTelegramDate(item.dueDate, timeZone)}`,
     `  Saldo pendiente: ${formatCurrency(Math.max(item.balance, 0), item.currency)}`,
     link ? `  Abrir recibo: ${link}` : null,
@@ -1625,7 +1625,7 @@ function formatTelegramDigestRenewalLine(item: TelegramRenewalItem, timeZone = D
 
   return [
     `• ${item.clientName}`,
-    `  Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
     `  Vence ${renewalLabel} · ${formatTelegramDate(item.endDate, timeZone)}`,
     link ? `  Abrir póliza: ${link}` : null,
   ].filter(Boolean).join("\n");
@@ -1756,6 +1756,67 @@ function formatTelegramDigestDate(date: Date, timeZone: string) {
   return formatted.charAt(0).toLocaleUpperCase("es-MX") + formatted.slice(1);
 }
 
+const TELEGRAM_INSURER_BRAND_ALIASES: Array<[RegExp, string]> = [
+  [/\bqualitas\b/, "Qualitas"],
+  [/\bbupa\b/, "Bupa"],
+  [/\b(?:seguros\s+)?banorte\b/, "Banorte"],
+  [/\bzurich\b/, "Zurich"],
+  [/\b(?:grupo\s+nacional\s+provincial|gnp)\b/, "GNP"],
+  [/\baxa\b/, "AXA"],
+  [/\bmapfre\b/, "MAPFRE"],
+  [/\bhdi\b/, "HDI"],
+  [/\bchubb\b/, "Chubb"],
+  [/\baba(?:\s+seguros)?\b/, "ABA"],
+  [/\bana(?:\s+seguros)?\b/, "ANA"],
+  [/\batlas\b/, "Atlas"],
+  [/\binbursa\b/, "Inbursa"],
+  [/\bafirme\b/, "Afirme"],
+  [/\baig\b/, "AIG"],
+  [/\bmetlife\b/, "MetLife"],
+  [/\bprudential\b/, "Prudential"],
+  [/\b(?:seguros\s+)?monterrey(?:\s+new\s+york\s+life)?\b/, "Monterrey"],
+  [/\b(?:el\s+)?aguila\b/, "El Águila"],
+  [/\bpotosi\b/, "El Potosí"],
+  [/\b(?:la\s+)?latino(?:americana)?\b/, "La Latino"],
+  [/\bpeninsular\b/, "La Peninsular"],
+  [/\bprimero(?:\s+seguros)?\b/, "Primero"],
+  [/\bsura\b/, "Sura"],
+  [/\btokio\s+marine\b/, "Tokio Marine"],
+  [/\bsompo\b/, "Sompo"],
+  [/\ballianz\b/, "Allianz"],
+  [/\bve\s+por\s+mas\b/, "Ve por Más"],
+  [/\bbx\s*\+/, "Ve por Más"],
+  [/\bbbva\b/, "BBVA"],
+  [/\baserta\b/, "Aserta"],
+  [/\bgmx\b/, "GMX"],
+  [/\bargos\b/, "Argos"],
+  [/\bthona\b/, "Thona"],
+  [/\bberkley\b/, "Berkley"],
+  [/\bgeneral\s+de\s+seguros\b/, "General de Seguros"],
+  [/\bpan[\s-]?american\b/, "Pan-American"],
+];
+
+function formatTelegramDigestInsurerName(name: string) {
+  const normalized = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-MX")
+    .replace(/[^a-z0-9+]+/g, " ")
+    .trim();
+  const alias = TELEGRAM_INSURER_BRAND_ALIASES.find(([pattern]) => pattern.test(normalized));
+  if (alias) return alias[1];
+
+  return normalized
+    .replace(/\b(?:compania|institucion|de seguros)\b/g, " ")
+    .replace(/\b(?:s\s*a\s*b?|sapi|sa|de|c\s*v|cv)\b/g, " ")
+    .replace(/\b(?:seguros|aseguradora)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase("es-MX"));
+}
+
+const TELEGRAM_DIGEST_SECTION_DIVIDER = "━━━━━━━━━━━━━━";
+
 function formatTelegramDigestSummary(input: {
   dayStart: Date;
   timeZone: string;
@@ -1785,12 +1846,20 @@ function formatTelegramDigestSummary(input: {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([currency, amount]) => `• ${formatCurrency(amount, currency)}`);
 
+  const sections = [
+    attention.length > 0 ? ["🔴 Para atender", ...attention] : null,
+    upcoming.length > 0 ? ["📅 Próximamente", ...upcoming] : null,
+    balanceLines.length > 0 ? ["💰 Saldo por cobrar · vencidos, hoy y próximos 14 días", ...balanceLines] : null,
+    attention.length === 0 && upcoming.length === 0 ? ["✅ Sin pendientes urgentes ni próximos."] : null,
+  ].filter((section): section is string[] => section !== null);
+
   return [
     `📋 Resumen diario · ${formatTelegramDigestDate(input.dayStart, input.timeZone)}`,
-    ...(attention.length > 0 ? ["", "🔴 Para atender", ...attention] : []),
-    ...(upcoming.length > 0 ? ["", "📅 Próximamente", ...upcoming] : []),
-    ...(balanceLines.length > 0 ? ["", "💰 Saldo por cobrar · vencidos, hoy y próximos 14 días", ...balanceLines] : []),
-    ...(attention.length === 0 && upcoming.length === 0 ? ["", "✅ Sin pendientes urgentes ni próximos."] : []),
+    ...sections.flatMap((section, index) => [
+      "",
+      ...(index > 0 ? [TELEGRAM_DIGEST_SECTION_DIVIDER, ""] : []),
+      ...section,
+    ]),
   ].join("\n");
 }
 
@@ -1827,7 +1896,9 @@ export function buildTelegramDailyDigestMessages(input: {
 }): TelegramDigestMessagePart[] {
   const summary = formatTelegramDigestSummary(input);
   const detailLines = formatTelegramDigestDetailLines(input).flatMap((block, index) =>
-    index === 0 ? block.split("\n") : ["", ...block.split("\n")],
+    index === 0
+      ? block.split("\n")
+      : ["", TELEGRAM_DIGEST_SECTION_DIVIDER, "", ...block.split("\n")],
   );
   const detailMessages = splitTelegramMessageLines(detailLines);
 
