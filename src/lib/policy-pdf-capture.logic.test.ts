@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildPolicyPdfCaptureFieldConfidence,
+  buildPolicyPdfCaptureReceiptPlan,
+  extractPolicyPdfReceiptAmounts,
   extractPolicyPdfDraftFromText,
   inferClientType,
   normalizePdfPaymentFrequencyLabel,
@@ -29,6 +31,30 @@ describe("policy-pdf-capture", () => {
     expect(normalizePdfPaymentFrequencyLabel("Anual")).toBe("Anual");
     expect(normalizePdfPaymentFrequencyLabel("ANNUAL")).toBe("Anual");
     expect(normalizePdfPaymentFrequencyLabel("Mensual")).toBe("Mensual");
+  });
+
+  it("uses the complete evidenced receipt schedule only when it reconciles to the policy premium", () => {
+    const text = Array.from({ length: 12 }, (_, index) => `
+      AVISO DE COBRO DE PRIMAS DE AUTOMÓVILES
+      SERIE ${index + 1}/12
+      TOTAL A PAGAR $${index === 0 ? "13,566.49" : "12,789.34"}
+    `).join("\n");
+    const amounts = extractPolicyPdfReceiptAmounts(text);
+    const draft = {
+      policyNumber: "0940465026",
+      startDate: "2026-10-27",
+      endDate: "2027-10-27",
+      paymentFrequency: "MONTHLY",
+      premiumAmount: 154249.23,
+      currency: "MXN",
+    };
+
+    expect(amounts).toHaveLength(12);
+    expect(buildPolicyPdfCaptureReceiptPlan(draft, amounts).map((item) => item.amount)).toEqual([
+      13566.49,
+      ...Array(11).fill(12789.34),
+    ]);
+    expect(buildPolicyPdfCaptureReceiptPlan({ ...draft, premiumAmount: 154249.22 }, amounts)[0]?.amount).toBe(12854.1);
   });
 
   it("extracts the core renewal fields from the PDF text layout", () => {

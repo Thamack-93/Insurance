@@ -7,6 +7,7 @@ import {
   extractPolicyPdfReceiptEvidence,
   buildPolicyPdfCaptureFieldConfidence,
   buildPolicyPdfCaptureReceiptPlan,
+  type PolicyPdfCaptureReceiptPlanItem,
   type PolicyCaptureSourceOption,
   type PolicyPdfCaptureAiReview,
   type PolicyPdfCaptureDraft,
@@ -229,6 +230,7 @@ type PolicyPdfCapturePreviewInput = {
   skipAiReview?: boolean;
   extraWarnings?: string[];
   receiptEvidence?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureReceiptEvidence | null;
+  receiptPlan?: PolicyPdfCaptureReceiptPlanItem[];
   relatedDocuments?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureRelatedDocument[];
   reviewText?: string | null;
   context: PolicyPdfCapturePreviewContext;
@@ -455,7 +457,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
       insurerId: suggestedInsurerId,
       sourcePolicyId: suggestedSourcePolicyId,
     },
-    receiptPlan: buildPolicyPdfCaptureReceiptPlan(input.draft),
+    receiptPlan: input.receiptPlan ?? buildPolicyPdfCaptureReceiptPlan(input.draft, input.draft.receiptPlanAmounts),
     clientOptions: clientCandidates,
     insurerOptions: insurerCandidates,
     sourcePolicyOptions: sourcePolicyCandidates,
@@ -487,6 +489,7 @@ export async function buildPolicyPdfCapturePreviewFromText(
     draft,
     fieldConfidence,
     reviewText: text,
+    receiptPlan: buildPolicyPdfCaptureReceiptPlan(draft, draft.receiptPlanAmounts),
     ...options,
     receiptEvidence,
     context,
