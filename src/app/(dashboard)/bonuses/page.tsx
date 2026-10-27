@@ -5,6 +5,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatCurrencyExact, toNumber } from "@/lib/money";
+import { appendReturnTo } from "@/lib/return-to";
+import { bonusApprovalBlockReason } from "@/lib/bonus-approval";
 import { withTenantTransaction, requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { BONUS_PROGRAMS, resolveBonusProgram } from "@/lib/bonus-rules";
 import { bonusPeriodLabel } from "@/lib/bonus-periods";
@@ -14,6 +16,7 @@ import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
 import { BonusProjectionForm } from "./bonus-projection-form";
 import { BonusRunItemsTable } from "./bonus-run-items-table";
+import { BonusRunActionForm } from "./bonus-run-action-form";
 import { AutoBonusEvidenceBatchForm } from "./auto-bonus-evidence-batch-form";
 import { ChevronDown } from "lucide-react";
 
@@ -42,7 +45,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
     const run = runId ? await db.bonusRun.findFirst({
       where: { id: runId, organizationId: context.organizationId },
       relationLoadStrategy: "join",
-      include: { seller: { select: { name: true } }, approvedBy: { select: { name: true } }, ruleSet: { select: { version: true, sourceFileName: true, sourceHash: true } }, items: { include: { payment: { select: { paidDate: true } }, policy: { select: { policyNumber: true } }, receipt: { select: { receiptNumber: true } } }, orderBy: [{ status: "asc" }, { createdAt: "asc" }] } },
+      include: { seller: { select: { name: true } }, approvedBy: { select: { name: true } }, ruleSet: { select: { version: true, sourceFileName: true, sourceHash: true } }, items: { include: { payment: { select: { paidDate: true } }, policy: { select: { id: true, policyNumber: true } }, receipt: { select: { id: true, receiptNumber: true } } }, orderBy: [{ status: "asc" }, { createdAt: "asc" }] } },
     }) : null;
     const recentRuns = await db.bonusRun.findMany({ where: { organizationId: context.organizationId }, relationLoadStrategy: "join", include: { seller: { select: { name: true } } }, orderBy: { updatedAt: "desc" }, take: 12 });
     const retentionStatus = await db.maintenanceRun.findFirst({ where: { organizationId: context.organizationId, type: "BONUS_RUN_RETENTION" }, orderBy: { completedAt: "desc" } });
@@ -196,7 +199,10 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
             id: item.id,
             status: item.status === "INCLUDED" ? ("INCLUDED" as const) : item.status === "EXCLUDED" ? ("EXCLUDED" as const) : ("REVIEW" as const),
             paymentReference: item.paymentId?.slice(-8) ?? "—",
-            receiptPolicy: `${item.receipt?.receiptNumber ?? "—"} / ${item.policy?.policyNumber ?? "—"}`,
+            receiptNumber: item.receipt?.receiptNumber ?? null,
+            receiptHref: item.receipt?.id ? appendReturnTo(`/receipts/${encodeURIComponent(item.receipt.id)}`, `/bonuses?run=${encodeURIComponent(run.id)}`) : null,
+            policyNumber: item.policy?.policyNumber ?? null,
+            policyHref: item.policy?.id ? appendReturnTo(`/policies/${encodeURIComponent(item.policy.id)}`, `/bonuses?run=${encodeURIComponent(run.id)}`) : null,
             paidDate: item.payment?.paidDate?.toLocaleDateString("es-MX") ?? "—",
             paidAmount: item.paidAmount === null ? "—" : formatCurrency(toNumber(item.paidAmount), item.currency ?? "MXN"),
             netPremiumPaid: item.netPremiumPaid === null ? "—" : formatCurrency(toNumber(item.netPremiumPaid), item.currency ?? "MXN"),
@@ -207,36 +213,57 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
           {premiumReviewGroups.length ? <div className="mt-5 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
             <h3 className="font-medium">Aceptar prima neta derivada</h3>
             <p className="mt-1 text-sm text-muted-foreground">Las estimaciones de la siguiente acción vienen del desglose por unidad. La aceptación queda registrada en esta corrida y no aprueba el cierre.</p>
-            <form action={acceptBonusRunPremiumBatch} className="mt-3 rounded-md border bg-background p-3">
-              <input type="hidden" name="runId" value={run.id} />
-              <input type="hidden" name="version" value={run.version} />
+            <div className="mt-3 rounded-md border bg-background p-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-sm font-medium">Aceptar todas las pendientes elegibles: {premiumReviewGroups.length} {premiumReviewGroups.length === 1 ? "póliza" : "pólizas"} · {premiumReviewSummary.paymentCount} pagos</p>
                   <p className="mt-1 text-xs text-muted-foreground">PNP asignada por moneda: {premiumReviewCurrencySummary || "—"}</p>
                   <p className="mt-1 text-sm font-medium">Base computable que se añadirá: {formatCurrencyExact(premiumReviewSummary.eligibleAmountMxn, "MXN")} MXN</p>
                   <p className="mt-1 text-xs text-muted-foreground">Sólo acepta partidas con PNP completa derivada por unidad; otras causas de revisión permanecen pendientes.</p>
-                  <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Revisé el resumen y acepto como computables todas las partidas elegibles de PNP listadas para esta corrida.</span></label>
                 </div>
-                <Button type="submit">Aceptar todas</Button>
+                <BonusRunActionForm
+                  action={acceptBonusRunPremiumBatch}
+                  runId={run.id}
+                  version={run.version}
+                  buttonLabel="Aceptar todas"
+                  attestationLabel="Revisé el resumen y acepto como computables todas las partidas elegibles de PNP listadas para esta corrida."
+                  className="flex flex-col gap-3 sm:flex-row sm:items-center"
+                />
               </div>
-            </form>
+            </div>
             <details className="group mt-3 rounded-md border bg-background">
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-muted/40">Revisar o aceptar por póliza</summary>
               <div className="divide-y border-t">
-                {premiumReviewGroups.map((group) => <form key={group.policyId} action={acceptBonusRunPolicyPremium} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <input type="hidden" name="runId" value={run.id} />
-                  <input type="hidden" name="policyId" value={group.policyId} />
-                  <input type="hidden" name="version" value={run.version} />
-                  <div><p className="text-sm font-medium">Póliza {group.policyNumber} · {group.count} {group.count === 1 ? "pago" : "pagos"}</p><p className="mt-1 text-xs text-muted-foreground">PNP: {group.netPremiumByCurrency.map(({ currency, amount }) => formatCurrencyExact(amount, currency)).join(" + ")} · Base computable: {formatCurrencyExact(group.eligibleAmountMxn, "MXN")} MXN</p><label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" /><span>Acepto la prima neta derivada para esta póliza y esta proyección, con base en los importes registrados.</span></label></div>
-                  <Button type="submit" variant="outline">Hacer computables</Button>
-                </form>)}
+                {premiumReviewGroups.map((group) => <div key={group.policyId} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div><p className="text-sm font-medium">Póliza {group.policyNumber} · {group.count} {group.count === 1 ? "pago" : "pagos"}</p><p className="mt-1 text-xs text-muted-foreground">PNP: {group.netPremiumByCurrency.map(({ currency, amount }) => formatCurrencyExact(amount, currency)).join(" + ")} · Base computable: {formatCurrencyExact(group.eligibleAmountMxn, "MXN")} MXN</p></div>
+                  <BonusRunActionForm
+                    action={acceptBonusRunPolicyPremium}
+                    runId={run.id}
+                    version={run.version}
+                    policyId={group.policyId}
+                    buttonLabel="Hacer computables"
+                    attestationLabel="Acepto la prima neta derivada para esta póliza y esta proyección, con base en los importes registrados."
+                    variant="outline"
+                    className="flex flex-col gap-3 sm:flex-row sm:items-center"
+                  />
+                </div>)}
               </div>
             </details>
           </div> : null}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
           <p>{run.status === "APPROVED" ? `Aprobado por ${run.approvedBy?.name ?? "administración"} el ${run.approvedAt?.toLocaleDateString("es-MX")}.` : `Versión de cálculo ${run.version}.`} Reglas v{run.ruleSet.version} · {run.ruleSet.sourceFileName} · SHA-256 {run.ruleSet.sourceHash.slice(0, 12)}…</p>
-            {run.status !== "APPROVED" ? <form action={approveBonusRun} className="flex flex-col items-start gap-2 sm:items-end"><input type="hidden" name="runId" value={run.id} /><input type="hidden" name="version" value={run.version} /><label className="flex max-w-md items-start gap-2 text-xs text-muted-foreground"><input required type="checkbox" name="reviewAttestation" className="mt-0.5 accent-primary" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")} /><span>Confirmo que revisé las partidas, exclusiones, evidencias, periodo y monto de este cierre.</span></label><Button type="submit" disabled={run.status !== "READY" || run.items.some((item) => item.status === "REVIEW")}>Aprobar cierre</Button></form> : null}
+            {run.status !== "APPROVED" ? <div className="flex flex-col items-start gap-2 sm:items-end">
+              <BonusRunActionForm
+                action={approveBonusRun}
+                runId={run.id}
+                version={run.version}
+                disabled={bonusApprovalBlockReason(run.status, run.items.map((item) => item.status)) !== null}
+                buttonLabel="Aprobar cierre"
+                attestationLabel="Confirmo que revisé las partidas, exclusiones, evidencias, periodo y monto de este cierre."
+                className="flex flex-col items-start gap-2 sm:items-end"
+              />
+              {bonusApprovalBlockReason(run.status, run.items.map((item) => item.status)) === "EMPTY" ? <p className="max-w-md text-xs text-muted-foreground">No se puede aprobar una proyección sin pagos. Genera una proyección que incluya partidas de pago.</p> : null}
+            </div> : null}
           </div>
         </SectionCard>
         ) : null}

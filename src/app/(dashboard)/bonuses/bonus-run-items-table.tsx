@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type ItemStatus = "INCLUDED" | "EXCLUDED" | "REVIEW";
@@ -8,7 +9,10 @@ type BonusItemRow = {
   id: string;
   status: ItemStatus;
   paymentReference: string;
-  receiptPolicy: string;
+  receiptNumber: string | null;
+  receiptHref: string | null;
+  policyNumber: string | null;
+  policyHref: string | null;
   paidDate: string;
   paidAmount: string;
   netPremiumPaid: string;
@@ -74,7 +78,12 @@ export function BonusRunItemsTable({ items }: { items: BonusItemRow[] }) {
               <TableRow key={item.id}>
                 <TableCell><span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${item.status === "INCLUDED" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : item.status === "EXCLUDED" ? "bg-muted text-muted-foreground" : "bg-amber-500/10 text-amber-800 dark:text-amber-300"}`}>{itemStatusLabel(item.status)}</span></TableCell>
                 <TableCell className="font-mono text-xs">{item.paymentReference}</TableCell>
-                <TableCell>{item.receiptPolicy}</TableCell>
+                <TableCell>
+                  <div className="flex min-w-32 flex-col items-start gap-1">
+                    {item.receiptHref ? <Link className="text-primary underline-offset-4 hover:underline" href={item.receiptHref}>Recibo {item.receiptNumber ?? "sin número"}</Link> : <span>Recibo {item.receiptNumber ?? "—"}</span>}
+                    {item.policyHref ? <Link className="text-primary underline-offset-4 hover:underline" href={item.policyHref}>Póliza {item.policyNumber ?? "sin número"}</Link> : <span>Póliza {item.policyNumber ?? "—"}</span>}
+                  </div>
+                </TableCell>
                 <TableCell>{item.paidDate}</TableCell>
                 <TableCell>{item.paidAmount}</TableCell>
                 <TableCell>{item.netPremiumPaid}</TableCell>
