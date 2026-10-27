@@ -1599,14 +1599,16 @@ function formatTelegramDigestReceiptLine(item: TelegramReceiptItem, timeZone = D
   ].filter(Boolean).join("\n");
 }
 
+function formatTelegramRenewalLabel(daysUntilRenewal: number) {
+  const dayCount = (days: number) => `${days} ${days === 1 ? "día" : "días"}`;
+  if (daysUntilRenewal < 0) return `vencida hace ${dayCount(Math.abs(daysUntilRenewal))}`;
+  if (daysUntilRenewal === 0) return "vence hoy";
+  return `vence en ${dayCount(daysUntilRenewal)}`;
+}
+
 function formatTelegramRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
   const diff = daysUntil(item.endDate);
-  const renewalLabel =
-    diff < 0
-      ? `vencida hace ${Math.abs(diff)} días`
-      : diff === 0
-        ? "vence hoy"
-        : `vence en ${diff} días`;
+  const renewalLabel = formatTelegramRenewalLabel(diff);
   return [
     `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
     `  ${formatTelegramDate(item.endDate, timeZone)} · ${renewalLabel}`,
@@ -1615,18 +1617,13 @@ function formatTelegramRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT
 
 function formatTelegramDigestRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
   const diff = daysUntil(item.endDate);
-  const renewalLabel =
-    diff < 0
-      ? `vencida hace ${Math.abs(diff)} días`
-      : diff === 0
-        ? "vence hoy"
-        : `vence en ${diff} días`;
+  const renewalLabel = formatTelegramRenewalLabel(diff);
   const link = buildPolicyDeskUrl(`/policies/${item.id}`);
 
   return [
     `• ${item.clientName}`,
     `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
-    `  Vence ${renewalLabel} · ${formatTelegramDate(item.endDate, timeZone)}`,
+    `  ${renewalLabel.charAt(0).toLocaleUpperCase("es-MX")}${renewalLabel.slice(1)} · ${formatTelegramDate(item.endDate, timeZone)}`,
     link ? `  Abrir póliza: ${link}` : null,
   ].filter(Boolean).join("\n");
 }
@@ -1815,7 +1812,7 @@ function formatTelegramDigestInsurerName(name: string) {
     .replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase("es-MX"));
 }
 
-const TELEGRAM_DIGEST_SECTION_DIVIDER = "━━━━━━━━━━━━━━";
+const TELEGRAM_DIGEST_SECTION_DIVIDER = "━".repeat(19);
 
 function formatTelegramDigestSummary(input: {
   dayStart: Date;
