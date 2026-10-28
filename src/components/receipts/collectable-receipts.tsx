@@ -9,7 +9,6 @@ import { BadgeCheck, ChevronDown, Link2, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { StatusBadge } from "@/components/badges/status-badge";
 import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { ConfirmDialog } from "@/components/drawers/confirm-dialog";
@@ -55,8 +54,11 @@ export function CollectableReceipts({ receipts, returnTo, isDemo = false, qualit
 
   return (
     <BulkActionsProvider>
-      <div className="overflow-hidden rounded-md border border-border/70 bg-card">
+      <div className="overflow-hidden rounded-xl border border-border/70 bg-card">
         <BulkToolbar receipts={receipts} />
+        <div className="hidden grid-cols-[minmax(16rem,1.5fr)_minmax(13rem,1fr)_9rem_9rem_auto] gap-4 border-y bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground xl:grid">
+          <span>Recibo</span><span>Cliente y póliza</span><span>Vencimiento</span><span className="text-right">Importe</span><span className="w-48 text-right">Acciones</span>
+        </div>
         <div className="divide-y divide-border/70">
           {receipts.map((receipt) => (
             <ReceiptRow key={receipt.id} receipt={receipt} returnTo={returnTo} isDemo={isDemo} qualitasMonitorFeatureEnabled={qualitasMonitorFeatureEnabled} />
@@ -73,7 +75,7 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { selectedItems, hasSelection, clearSelection, getSelectedIds, selectAll } =
     useBulkActions();
-  const allIds = receipts.map((r) => r.id);
+  const allIds = receipts.filter((r) => r.paymentCount === 0).map((r) => r.id);
   const selectedCount = selectedItems.size;
 
   const handleConfirm = async () => {
@@ -107,8 +109,9 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
           size="sm"
           className="h-8 gap-2 text-xs text-muted-foreground"
           onClick={() => selectAll(allIds)}
+          disabled={allIds.length === 0}
         >
-          Seleccionar todos en esta página ({allIds.length})
+          Seleccionar los {allIds.length} recibos sin pagos de esta página
         </Button>
       </div>
     );
@@ -165,8 +168,9 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
   const overdue = isOverdue(due);
 
   return (
+    <>
     <div
-      className="flex flex-col gap-4 px-4 py-4 xl:flex-row xl:items-center xl:justify-between"
+      className="grid grid-cols-1 gap-3 px-4 py-4 xl:grid-cols-[minmax(16rem,1.5fr)_minmax(13rem,1fr)_9rem_9rem_auto] xl:items-center xl:gap-4"
       data-selected={isSelected}
     >
       <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -174,7 +178,10 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
           <Checkbox
             checked={isSelected}
             onCheckedChange={() => toggleItem(receipt.id)}
-            aria-label={`Seleccionar recibo ${receipt.receiptNumber}`}
+            aria-label={receipt.paymentCount > 0
+              ? `El recibo ${receipt.receiptNumber} ya tiene un pago y no se puede seleccionar para registrar otro`
+              : `Seleccionar recibo ${receipt.receiptNumber}`}
+            disabled={receipt.paymentCount > 0}
           />
         </div>
         <div className="min-w-0 flex-1">
@@ -190,34 +197,31 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
                 {receipt.originLabel}
               </Badge>
             ) : null}
-            <Badge variant={overdue ? "destructive" : "secondary"}>
-              {overdue ? "Vencido" : "Pendiente"}
+            <Badge variant={receipt.paymentCount > 0 ? "outline" : overdue ? "destructive" : "secondary"}>
+              {receipt.paymentCount > 0 ? "Pago por revisar" : overdue ? "Vencido" : "Pendiente"}
             </Badge>
-            <StatusBadge status={receipt.status} entity="receipt" />
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {receipt.client.fullName} · {receipt.policy.policyNumber} · {receipt.insurer.name}
-          </p>
-          {receipt.endorsement ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Endoso {receipt.endorsement.endorsementNumber}
-              {receipt.endorsement.reference ? ` · ${receipt.endorsement.reference}` : ""}
-            </p>
-          ) : null}
-          <p className="mt-1 text-xs text-muted-foreground">Vence {formatDate(due)}</p>
         </div>
       </div>
-      <div className="flex flex-col gap-2 border-t border-border/60 pt-3 xl:min-w-[26rem] xl:border-t-0 xl:pt-0">
-        <div className="flex items-baseline justify-between gap-3 xl:justify-end">
-          <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Monto</span>
-          <div className="text-right">
-            <p className="font-semibold tabular-nums">{formatCurrency(receipt.amount, receipt.currency)}</p>
-            <p className="text-xs text-muted-foreground">{receipt.currency}</p>
-          </div>
+      <div className="min-w-0 pl-8 text-sm xl:pl-0">
+        <p className="truncate font-medium text-foreground">{receipt.client.fullName}</p>
+        <p className="mt-1 truncate text-muted-foreground">Póliza {receipt.policy.policyNumber} · {receipt.insurer.name}</p>
+        {receipt.endorsement ? <p className="mt-1 truncate text-xs text-muted-foreground">Endoso {receipt.endorsement.endorsementNumber}{receipt.endorsement.reference ? ` · ${receipt.endorsement.reference}` : ""}</p> : null}
+      </div>
+      <div className="flex items-center justify-between gap-3 pl-8 text-sm xl:block xl:pl-0">
+        <span className="text-xs text-muted-foreground xl:hidden">Vencimiento</span>
+        <span className="font-medium">{formatDate(due)}</span>
+      </div>
+      <div className="flex items-baseline justify-between gap-3 pl-8 xl:justify-end xl:pl-0">
+        <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground xl:hidden">Importe</span>
+        <div className="text-right">
+          <p className="font-semibold tabular-nums">{formatCurrency(receipt.amount, receipt.currency)}</p>
+          <p className="text-xs text-muted-foreground">{receipt.currency}</p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <QuickPaymentDialog
-            className="h-8 px-3 text-xs"
+      </div>
+      <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:justify-end xl:border-t-0 xl:pt-0">
+          {receipt.paymentCount === 0 ? <QuickPaymentDialog
+            className="h-10 w-full justify-center px-3 text-xs sm:h-8 sm:w-auto"
             receipt={{
               id: receipt.id,
               receiptNumber: receipt.receiptNumber,
@@ -229,10 +233,14 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
               policy: { policyNumber: receipt.policy.policyNumber },
               endorsement: receipt.endorsement,
             }}
-          />
+          /> : (
+            <Button asChild size="sm" variant="outline" className="h-10 w-full sm:h-8 sm:w-auto">
+              <Link href={appendReturnTo(`/receipts/${receipt.id}`, returnTo)}>Revisar pago</Link>
+            </Button>
+          )}
           {((receipt.status === "PENDING" || receipt.status === "OVERDUE") || (receipt.qualitasEligible && receipt.qualitasEnabled) || (receipt.qualitasMonitorEligible && qualitasMonitorFeatureEnabled)) ? (
             <DropdownMenu>
-              <DropdownMenuTrigger render={<Button type="button" size="sm" variant="outline" className="h-8 gap-1 px-3 text-xs" />}>
+              <DropdownMenuTrigger render={<Button type="button" size="sm" variant="outline" className="h-10 w-full justify-between gap-1 px-3 text-xs sm:h-8 sm:w-auto sm:justify-center" />}>
                 Acciones
                 <ChevronDown className="size-3.5" />
               </DropdownMenuTrigger>
@@ -263,11 +271,11 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
               id={receipt.id}
               receiptNumber={receipt.receiptNumber}
               triggerLabel="Cancelar"
-              triggerClassName="h-8 bg-card/70 px-3 text-xs"
+              triggerClassName="h-10 w-full bg-card/70 px-3 text-xs sm:h-8 sm:w-auto"
             />
           ) : null}
-        </div>
       </div>
+    </div>
       {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
         <WhatsAppReminderButton
           ref={whatsappRef}
@@ -308,6 +316,6 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
           onOpenChange={(open) => setDialogAction(open ? "qualitas-monitor" : null)}
         />
       ) : null}
-    </div>
+    </>
   );
 }

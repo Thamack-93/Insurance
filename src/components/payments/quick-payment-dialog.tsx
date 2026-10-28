@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ControlledSelect } from "@/components/forms/form-primitives";
 import { CreditCard, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/money";
 import { formatDate, isOverdue, today } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
 import { parseBusinessDateInput } from "@/lib/business-dates";
+import { paymentMethodOptions } from "@/lib/domain-options";
 import { Badge } from "@/components/ui/badge";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 import { cn } from "@/lib/utils";
@@ -37,6 +39,9 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
   const [isOpen, setIsOpen] = useState(initialOpen);
   const [isPending, startTransition] = useTransition();
   const [paidDate, setPaidDate] = useState(formatDateInput(today()));
+  const [paymentMethod, setPaymentMethod] = useState("TRANSFER");
+  const [step, setStep] = useState<"review" | "confirm">("review");
+  const selectedPaymentMethod = paymentMethodOptions.find((option) => option.value === paymentMethod)?.label ?? paymentMethod;
 
   const handleQuickPayment = () => {
     startTransition(async () => {
@@ -44,7 +49,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
         receiptId: receipt.id,
         amount: receipt.amount,
         paidDate,
-        paymentMethod: "TRANSFER",
+        paymentMethod,
       });
 
       if (!result.ok) {
@@ -63,6 +68,8 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
     setIsOpen(open);
     if (open) {
       setPaidDate(formatDateInput(today()));
+      setPaymentMethod("TRANSFER");
+      setStep("review");
     }
   };
 
@@ -70,20 +77,23 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm" className={cn("gap-2", className)} />}>
         <CreditCard className="h-4 w-4" />
-        Pagar
+        Registrar pago
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <DollarSign className="h-5 w-5" />
-            Pago Rápido
+            {step === "review" ? "Registrar pago" : "Confirmar pago"}
           </DialogTitle>
           <DialogDescription>
-            Confirma el pago para el recibo {receipt.receiptNumber}
+            {step === "review"
+              ? `Revisa el importe, la fecha y el método para el recibo ${receipt.receiptNumber}.`
+              : `Confirma que deseas registrar el pago del recibo ${receipt.receiptNumber}.`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          {step === "review" ? <>
           <div className="rounded-md bg-muted/40 p-4">
             <div className="grid gap-3 text-sm">
               <div className="flex items-center justify-between gap-3">
@@ -124,8 +134,8 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
               </div>
               <div className="border-t pt-3 mt-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-lg font-semibold">Monto a pagar:</span>
-                  <span className="text-lg font-bold text-emerald-700">
+                  <span className="font-semibold">Importe del recibo</span>
+                  <span className="text-lg font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
                     {formatCurrency(receipt.amount, receipt.currency)}
                   </span>
                 </div>
@@ -133,42 +143,56 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
             </div>
           </div>
 
-          <div className="space-y-3">
-            <div className="text-sm text-muted-foreground">
-              <p>• El pago se registrará con la fecha elegida</p>
-              <p>• Método de pago: Transferencia bancaria</p>
-              <p>• El recibo se marcará como pagado</p>
-            </div>
-
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor={`paid-date-${receipt.id}`}>
-                Fecha de pago
-              </label>
-              <Input
-                id={`paid-date-${receipt.id}`}
-                type="date"
-                required
-                value={paidDate}
-                onChange={(event) => setPaidDate(event.target.value)}
+              <label className="text-sm font-medium" htmlFor={`paid-date-${receipt.id}`}>Fecha de pago</label>
+              <Input id={`paid-date-${receipt.id}`} type="date" required value={paidDate} onChange={(event) => setPaidDate(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor={`payment-method-${receipt.id}`}>Método de pago</label>
+              <ControlledSelect
+                id={`payment-method-${receipt.id}`}
+                value={paymentMethod}
+                onValueChange={setPaymentMethod}
+                options={paymentMethodOptions}
+                aria-label="Método de pago"
               />
             </div>
           </div>
+          <p className="text-xs text-muted-foreground">Esta acción registra el importe completo del recibo; no permite abonos.</p>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => setIsOpen(false)}>Cancelar</Button>
+            <Button onClick={() => setStep("confirm")} disabled={!paidDate} className="sm:min-w-40">Revisar pago</Button>
+          </div>
+          </> : <>
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <dl className="space-y-3 text-sm">
+              <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Recibo</dt><dd className="font-medium">{receipt.receiptNumber}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Cliente</dt><dd className="text-right font-medium">{receipt.client.fullName}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Importe</dt><dd className="font-semibold tabular-nums">{formatCurrency(receipt.amount, receipt.currency)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Método</dt><dd className="font-medium">{selectedPaymentMethod}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Fecha</dt><dd className="font-medium">{formatDate(parseBusinessDateInput(paidDate))}</dd></div>
+            </dl>
+            <div className="mt-4 flex items-center justify-between border-t pt-3 text-sm">
+              <span className="text-muted-foreground">Saldo restante al completar</span>
+              <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{formatCurrency(0, receipt.currency)}</span>
+            </div>
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => setStep("review")} disabled={isPending}>Volver a revisar</Button>
             <Button
               onClick={handleQuickPayment}
               disabled={isPending}
-              className="flex-1"
-              aria-label={`Pagar ${formatCurrency(receipt.amount, receipt.currency)}`}
+              className="sm:min-w-40"
+              aria-label={`Confirmar pago de ${formatCurrency(receipt.amount, receipt.currency)}`}
             >
               {isPending
-                ? "Procesando..."
-                : `Pagar ${formatCurrency(receipt.amount, receipt.currency)}`}
-            </Button>
-            <Button variant="outline" onClick={() => setIsOpen(false)} disabled={isPending}>
-              Cancelar
+                ? "Registrando..."
+                : "Confirmar pago"}
             </Button>
           </div>
+          </>}
         </div>
       </DialogContent>
     </Dialog>

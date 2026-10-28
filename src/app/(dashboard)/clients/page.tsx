@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Building2, FileText, Users2, UserRound } from "@/components/icons";
+import { ArrowRight, Building2, ChevronDown, FileText, Users2, UserRound } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -19,7 +19,6 @@ import {
   buildClientListWhere,
   readClientListFilters,
 } from "@/lib/list-filters";
-import { LocalNavigation } from "@/components/layout/local-navigation";
 import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 
@@ -128,17 +127,6 @@ export default async function ClientsPage({
           }
         />
 
-        <LocalNavigation
-          label="Tipos de cliente"
-          items={[
-            { label: "Activos", href: "/clients", excludeQueryKeys: ["type", "status"] },
-            { label: "Todos", href: "/clients?status=ALL", excludeQueryKeys: ["type"] },
-            { label: "Archivados", href: "/clients?status=ARCHIVED", excludeQueryKeys: ["type"] },
-            { label: "Personas", href: "/clients?type=PERSON" },
-            { label: "Empresas", href: "/clients?type=COMPANY" },
-          ]}
-        />
-
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Clientes activos"
@@ -175,7 +163,7 @@ export default async function ClientsPage({
           description="Por defecto muestra clientes activos; usa Todos para consultar el directorio completo."
         >
           <div className="border-b border-border/70 px-4 py-3">
-            <div className="flex flex-col items-stretch gap-3">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <StatusFilterButtons
                 selectedValue={statusFilter ?? "ALL"}
                 options={entityStatusOptions.map((option) => ({
@@ -185,6 +173,7 @@ export default async function ClientsPage({
                 allLabel="Todos"
               />
               <TableToolbar
+                className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end"
                 searchPlaceholder="Buscar por nombre, correo, teléfono o RFC..."
                 resultCount={filteredCount}
                 totalCount={totalCount}
@@ -251,10 +240,18 @@ export default async function ClientsPage({
           )}
         </SectionCard>
 
-        <SectionCard
-          title="Top por cartera"
-          description="Clientes ordenados por valor de prima activa."
-        >
+        <details className="group overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 marker:content-none [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0">
+              <span className="block font-semibold text-foreground">Top por cartera</span>
+              <span className="mt-1 block text-sm text-muted-foreground">Clientes ordenados por valor de prima activa.</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-3 text-sm text-muted-foreground">
+              {topByPortfolio.length} clientes
+              <ChevronDown aria-hidden="true" className="size-4 transition-transform group-open:rotate-180" />
+            </span>
+          </summary>
+          <div className="border-t border-border/70">
           {topByPortfolio.length === 0 ? (
             <div className="p-4">
               <EmptyState
@@ -302,7 +299,8 @@ export default async function ClientsPage({
               </TableBody>
             </Table>
           )}
-        </SectionCard>
+          </div>
+        </details>
       </div>
     </div>
   );

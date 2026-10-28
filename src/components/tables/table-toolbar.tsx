@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Columns3, Rows3 } from "lucide-react";
+import { Columns3, Rows3, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -59,7 +59,7 @@ type TableToolbarProps = {
 export function TableToolbar({
   searchPlaceholder = "Buscar...",
   filters = [],
-  clearLabel = "Limpiar",
+  clearLabel = "Limpiar filtros",
   actions,
   className,
   tableControls = true,
@@ -139,6 +139,24 @@ export function TableToolbar({
             allValue={filter.allValue}
           />
         ))}
+        {activeFilters.map((filter) => {
+          const value = searchParams.get(filter.key) ?? "";
+          const label = filter.options.find((option) => option.value === value)?.label ?? value;
+          return (
+            <Button
+              key={`active-${filter.key}`}
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-8 gap-1.5 rounded-full px-3"
+              aria-label={`Quitar filtro ${filter.label}: ${label}`}
+              onClick={() => router.replace(buildTableHref(pathname, searchParams, { [filter.key]: null }, { resetPage: true }), { scroll: false })}
+            >
+              {filter.label}: {label}
+              <X className="size-3.5" aria-hidden="true" />
+            </Button>
+          );
+        })}
         {isFiltered || hasSort ? (
           <Button type="button" variant="outline" onClick={clearAll}>
             {clearLabel}
