@@ -1781,8 +1781,8 @@ function formatTelegramDigestSummary(input: {
 }) {
   const attention = [
     input.overdueReceipts.total > 0 ? `• Cobros vencidos: ${getTelegramSummaryLabel(input.overdueReceipts.total, "recibo")}` : null,
-    input.todayReceipts.total > 0 ? `• Vencen hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}` : null,
     input.pendingWorkItems.total > 0 ? `• Tareas vencidas: ${getTelegramSummaryLabel(input.pendingWorkItems.total, "tarea")}` : null,
+    input.todayReceipts.total > 0 ? `• Vencen hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}` : null,
   ].filter((line): line is string => line !== null);
   const upcoming = [
     input.upcomingReceipts.total > 0 ? `• Cobros próximos (14 días): ${getTelegramSummaryLabel(input.upcomingReceipts.total, "recibo")}` : null,
@@ -1840,36 +1840,33 @@ function formatTelegramDigestDetailSections(input: {
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;");
   const withInlineLink = (body: string, label: string, url: string | null): TelegramDigestDetailItem => ({
-    body: url
-      ? `${escapeHtml(body)}\n↗ <a href="${escapeHtml(url)}">${escapeHtml(label)}</a>`
-      : escapeHtml(body),
+    body: `${body.split("\n").map((line, index) => {
+      if (index === 0 && line.startsWith("• ")) {
+        return `• <b>${escapeHtml(line.slice(2))}</b>`;
+      }
+      return escapeHtml(line);
+    }).join("\n")}${url ? `\n↗ <a href="${escapeHtml(url)}">${escapeHtml(label)}</a>` : ""}`,
   });
   const receiptItems = (items: TelegramReceiptItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
     const url = buildPolicyDeskUrl(`/receipts/${item.id}`);
-    return {
-      ...withInlineLink(formatTelegramDigestReceiptLine(item, timeZone), "Abrir recibo", url),
-    };
+    return withInlineLink(formatTelegramDigestReceiptLine(item, timeZone), "Abrir recibo", url);
   });
   const renewalItems = (items: TelegramRenewalItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
     const url = buildPolicyDeskUrl(`/policies/${item.id}`);
-    return {
-      ...withInlineLink(formatTelegramDigestRenewalLine(item, timeZone), "Abrir póliza", url),
-    };
+    return withInlineLink(formatTelegramDigestRenewalLine(item, timeZone), "Abrir póliza", url);
   });
   const taskItems = (items: Awaited<ReturnType<typeof getOpenWorkItems>>[number][]): TelegramDigestDetailItem[] =>
     items.map((item) => {
       const url = buildPolicyDeskUrl(`/tasks/${item.id}`);
-      return {
-        ...withInlineLink(formatTelegramTaskLine(item), "Abrir pendiente", url),
-      };
+      return withInlineLink(formatTelegramTaskLine(item), "Abrir pendiente", url);
     });
   const section = (title: string, result: TelegramListResult<unknown>, items: TelegramDigestDetailItem[]): TelegramDigestDetailSection | null =>
     result.total > 0 ? { title, total: result.total, items } : null;
 
   return [
     section("🔴 Cobros vencidos", input.overdueReceipts, receiptItems(input.overdueReceipts.items, input.timeZone)),
-    section("📍 Recibos que vencen hoy", input.todayReceipts, receiptItems(input.todayReceipts.items, input.timeZone)),
     section("⏰ Tareas vencidas", input.pendingWorkItems, taskItems(input.pendingWorkItems.items)),
+    section("📍 Recibos que vencen hoy", input.todayReceipts, receiptItems(input.todayReceipts.items, input.timeZone)),
     section("🧾 Cobros próximos · 14 días", input.upcomingReceipts, receiptItems(input.upcomingReceipts.items, input.timeZone)),
     section("🔄 Renovaciones · 30 días", input.upcomingRenewals, renewalItems(input.upcomingRenewals.items, input.timeZone)),
   ].filter((value): value is TelegramDigestDetailSection => value !== null);
