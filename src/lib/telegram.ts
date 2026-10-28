@@ -1589,14 +1589,12 @@ function formatTelegramDigestReceiptLine(item: TelegramReceiptItem, timeZone = D
       : diff === 0
         ? "vence hoy"
         : `vence en ${diff} días`;
-  const link = buildPolicyDeskUrl(`/receipts/${item.id}`);
   return [
     `• ${item.clientName}`,
     `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
     `  Recibo ${item.receiptNumber} · ${dueLabel} · ${formatTelegramDate(item.dueDate, timeZone)}`,
     `  Saldo pendiente: ${formatCurrency(Math.max(item.balance, 0), item.currency)}`,
-    link ? `  Abrir recibo: ${link}` : null,
-  ].filter(Boolean).join("\n");
+  ].join("\n");
 }
 
 function formatTelegramRenewalLabel(daysUntilRenewal: number) {
@@ -1618,14 +1616,11 @@ function formatTelegramRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT
 function formatTelegramDigestRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
   const diff = daysUntil(item.endDate);
   const renewalLabel = formatTelegramRenewalLabel(diff);
-  const link = buildPolicyDeskUrl(`/policies/${item.id}`);
-
   return [
     `• ${item.clientName}`,
     `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
     `  ${renewalLabel.charAt(0).toLocaleUpperCase("es-MX")}${renewalLabel.slice(1)} · ${formatTelegramDate(item.endDate, timeZone)}`,
-    link ? `  Abrir póliza: ${link}` : null,
-  ].filter(Boolean).join("\n");
+  ].join("\n");
 }
 
 function buildTelegramSection(input: {
@@ -1694,48 +1689,6 @@ function parseTelegramDaysAndPage(argument: string | null, defaultDays: number) 
   if (!page.ok) return page;
 
   return { ok: true as const, days: days.days, page: page.page };
-}
-
-function splitTelegramMessageLines(lines: string[], maxLength = TELEGRAM_MESSAGE_LIMIT) {
-  const parts: string[] = [];
-  let current: string[] = [];
-
-  const pushCurrent = () => {
-    if (current.length > 0) {
-      parts.push(current.join("\n"));
-      current = [];
-    }
-  };
-
-  for (const line of lines) {
-    const candidate = current.length > 0 ? [...current, line].join("\n") : line;
-    if (candidate.length <= maxLength) {
-      current.push(line);
-      continue;
-    }
-
-    pushCurrent();
-
-    if (line.length <= maxLength) {
-      current = [line];
-      continue;
-    }
-
-    let start = 0;
-    while (start < line.length) {
-      const chunk = line.slice(start, start + maxLength);
-      if (chunk.length === maxLength && start + maxLength < line.length) {
-        parts.push(chunk);
-      } else {
-        current = [chunk];
-      }
-      start += maxLength;
-    }
-  }
-
-  pushCurrent();
-
-  return parts.filter(Boolean);
 }
 
 function getTelegramSummaryLabel(total: number, suffix: string) {
@@ -1860,7 +1813,18 @@ function formatTelegramDigestSummary(input: {
   ].join("\n");
 }
 
-function formatTelegramDigestDetailLines(input: {
+type TelegramDigestDetailItem = {
+  body: string;
+  button?: TelegramInlineKeyboardButton;
+};
+
+type TelegramDigestDetailSection = {
+  title: string;
+  total: number;
+  items: TelegramDigestDetailItem[];
+};
+
+function formatTelegramDigestDetailSections(input: {
   timeZone: string;
   overdueReceipts: TelegramListResult<TelegramReceiptItem>;
   todayReceipts: TelegramListResult<TelegramReceiptItem>;
@@ -1868,18 +1832,79 @@ function formatTelegramDigestDetailLines(input: {
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
   pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
 }) {
-  const section = (title: string, total: number, lines: string[]) =>
-    total > 0
-      ? buildTelegramSection({ title, total, lines, emptyText: "", itemSeparator: "\n\n" })
-      : null;
+  const receiptItems = (items: TelegramReceiptItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
+    const url = buildPolicyDeskUrl(`/receipts/${item.id}`);
+    return {
+      body: formatTelegramDigestReceiptLine(item, timeZone),
+      ...(url ? { button: { text: `Abrir recibo ${item.receiptNumber}`.slice(0, 64), url } } : {}),
+    };
+  });
+  const renewalItems = (items: TelegramRenewalItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
+    const url = buildPolicyDeskUrl(`/policies/${item.id}`);
+    return {
+      body: formatTelegramDigestRenewalLine(item, timeZone),
+      ...(url ? { button: { text: `Abrir póliza ${item.policyNumber}`.slice(0, 64), url } } : {}),
+    };
+  });
+  const taskItems = (items: Awaited<ReturnType<typeof getOpenWorkItems>>[number][]): TelegramDigestDetailItem[] =>
+    items.map((item) => ({ body: formatTelegramTaskLine(item) }));
+  const section = (title: string, result: TelegramListResult<unknown>, items: TelegramDigestDetailItem[]): TelegramDigestDetailSection | null =>
+    result.total > 0 ? { title, total: result.total, items } : null;
 
   return [
-    section("🔴 Cobros vencidos", input.overdueReceipts.total, input.overdueReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
-    section("📍 Recibos que vencen hoy", input.todayReceipts.total, input.todayReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
-    section("⏰ Tareas vencidas", input.pendingWorkItems.total, input.pendingWorkItems.items.map((item) => formatTelegramTaskLine(item))),
-    section("🧾 Cobros próximos · 14 días", input.upcomingReceipts.total, input.upcomingReceipts.items.map((item) => formatTelegramDigestReceiptLine(item, input.timeZone))),
-    section("🔄 Renovaciones · 30 días", input.upcomingRenewals.total, input.upcomingRenewals.items.map((item) => formatTelegramDigestRenewalLine(item, input.timeZone))),
-  ].filter((value): value is string => value !== null);
+    section("🔴 Cobros vencidos", input.overdueReceipts, receiptItems(input.overdueReceipts.items, input.timeZone)),
+    section("📍 Recibos que vencen hoy", input.todayReceipts, receiptItems(input.todayReceipts.items, input.timeZone)),
+    section("⏰ Tareas vencidas", input.pendingWorkItems, taskItems(input.pendingWorkItems.items)),
+    section("🧾 Cobros próximos · 14 días", input.upcomingReceipts, receiptItems(input.upcomingReceipts.items, input.timeZone)),
+    section("🔄 Renovaciones · 30 días", input.upcomingRenewals, renewalItems(input.upcomingRenewals.items, input.timeZone)),
+  ].filter((value): value is TelegramDigestDetailSection => value !== null);
+}
+
+function buildTelegramDigestDetailMessages(sections: TelegramDigestDetailSection[]) {
+  const messages: Array<{ body: string; replyMarkup?: TelegramInlineKeyboardMarkup }> = [];
+  let lines: string[] = [];
+  let buttons: TelegramInlineKeyboardButton[][] = [];
+  let currentSectionTitle: string | null = null;
+
+  const flush = () => {
+    if (lines.length === 0) return;
+    messages.push({
+      body: lines.join("\n"),
+      ...(buttons.length > 0 ? { replyMarkup: { inline_keyboard: buttons } } : {}),
+    });
+    lines = [];
+    buttons = [];
+    currentSectionTitle = null;
+  };
+
+  for (const section of sections) {
+    const heading = `${section.title} (${section.total})${section.items.length < section.total ? ` · mostrando ${section.items.length}` : ""}`;
+
+    for (let index = 0; index < section.items.length; index += 1) {
+      const item = section.items[index]!;
+      const itemLines = item.body.split("\n");
+      const isNewSection = currentSectionTitle !== section.title;
+      let prefix = lines.length === 0
+        ? [`${index > 0 ? `${heading} · continuación` : heading}`]
+        : isNewSection
+          ? ["", TELEGRAM_DIGEST_SECTION_DIVIDER, "", heading]
+          : [""];
+      let candidate = [...lines, ...prefix, ...itemLines].join("\n");
+
+      if (candidate.length > TELEGRAM_MESSAGE_LIMIT && lines.length > 0) {
+        flush();
+        prefix = [`${index > 0 ? `${heading} · continuación` : heading}`];
+        candidate = [...prefix, ...itemLines].join("\n");
+      }
+
+      lines = [...lines, ...prefix, ...itemLines];
+      currentSectionTitle = section.title;
+      if (item.button) buttons.push([item.button]);
+    }
+  }
+
+  flush();
+  return messages;
 }
 
 export function buildTelegramDailyDigestMessages(input: {
@@ -1892,12 +1917,7 @@ export function buildTelegramDailyDigestMessages(input: {
   pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
 }): TelegramDigestMessagePart[] {
   const summary = formatTelegramDigestSummary(input);
-  const detailLines = formatTelegramDigestDetailLines(input).flatMap((block, index) =>
-    index === 0
-      ? block.split("\n")
-      : ["", TELEGRAM_DIGEST_SECTION_DIVIDER, "", ...block.split("\n")],
-  );
-  const detailMessages = splitTelegramMessageLines(detailLines);
+  const detailMessages = buildTelegramDigestDetailMessages(formatTelegramDigestDetailSections(input));
 
   return [
     {
@@ -1907,9 +1927,9 @@ export function buildTelegramDailyDigestMessages(input: {
         inline_keyboard: [[{ text: "Ver cobros", callback_data: DIGEST_MANAGE_CALLBACK }]],
       },
     },
-    ...detailMessages.map((body, index) => ({
+    ...detailMessages.map((detail, index) => ({
       title: detailMessages.length > 1 ? `Resumen diario PolicyDesk · detalle ${index + 1}/${detailMessages.length}` : "Resumen diario PolicyDesk · detalle",
-      body,
+      ...detail,
     })),
   ];
 }
