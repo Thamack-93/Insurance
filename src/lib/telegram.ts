@@ -147,6 +147,7 @@ type TelegramDigestMessagePart = {
   title: string;
   body: string;
   replyMarkup?: TelegramInlineKeyboardMarkup;
+  parseMode?: "HTML";
 };
 
 type TelegramUser = {
@@ -1319,6 +1320,7 @@ export async function sendTelegramMessage(
   chatId: string,
   text: string,
   replyMarkup?: TelegramInlineKeyboardMarkup,
+  parseMode?: "HTML",
 ): Promise<TelegramSendResult> {
   const token = getTelegramBotToken();
   if (!token) {
@@ -1345,6 +1347,7 @@ export async function sendTelegramMessage(
         text: message.length <= 3900 ? message : `${message.slice(0, 3899)}…`,
         disable_web_page_preview: true,
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        ...(parseMode ? { parse_mode: parseMode } : {}),
       }),
       signal: controller.signal,
     });
@@ -1815,7 +1818,6 @@ function formatTelegramDigestSummary(input: {
 
 type TelegramDigestDetailItem = {
   body: string;
-  button?: TelegramInlineKeyboardButton;
 };
 
 type TelegramDigestDetailSection = {
@@ -1832,26 +1834,33 @@ function formatTelegramDigestDetailSections(input: {
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
   pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
 }) {
+  const escapeHtml = (value: string) => value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;");
+  const withInlineLink = (body: string, label: string, url: string | null): TelegramDigestDetailItem => ({
+    body: url
+      ? `${escapeHtml(body)}\n↗ <a href="${escapeHtml(url)}">${escapeHtml(label)}</a>`
+      : escapeHtml(body),
+  });
   const receiptItems = (items: TelegramReceiptItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
     const url = buildPolicyDeskUrl(`/receipts/${item.id}`);
     return {
-      body: formatTelegramDigestReceiptLine(item, timeZone),
-      ...(url ? { button: { text: `Abrir recibo ${item.receiptNumber}`.slice(0, 64), url } } : {}),
+      ...withInlineLink(formatTelegramDigestReceiptLine(item, timeZone), "Abrir recibo", url),
     };
   });
   const renewalItems = (items: TelegramRenewalItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
     const url = buildPolicyDeskUrl(`/policies/${item.id}`);
     return {
-      body: formatTelegramDigestRenewalLine(item, timeZone),
-      ...(url ? { button: { text: `Abrir póliza ${item.policyNumber}`.slice(0, 64), url } } : {}),
+      ...withInlineLink(formatTelegramDigestRenewalLine(item, timeZone), "Abrir póliza", url),
     };
   });
   const taskItems = (items: Awaited<ReturnType<typeof getOpenWorkItems>>[number][]): TelegramDigestDetailItem[] =>
     items.map((item) => {
       const url = buildPolicyDeskUrl(`/tasks/${item.id}`);
       return {
-        body: formatTelegramTaskLine(item),
-        ...(url ? { button: { text: `Abrir pendiente · ${item.title}`.slice(0, 64), url } } : {}),
+        ...withInlineLink(formatTelegramTaskLine(item), "Abrir pendiente", url),
       };
     });
   const section = (title: string, result: TelegramListResult<unknown>, items: TelegramDigestDetailItem[]): TelegramDigestDetailSection | null =>
@@ -1867,19 +1876,17 @@ function formatTelegramDigestDetailSections(input: {
 }
 
 function buildTelegramDigestDetailMessages(sections: TelegramDigestDetailSection[]) {
-  const messages: Array<{ body: string; replyMarkup?: TelegramInlineKeyboardMarkup }> = [];
+  const messages: Array<{ body: string; parseMode: "HTML" }> = [];
   let lines: string[] = [];
-  let buttons: TelegramInlineKeyboardButton[][] = [];
   let currentSectionTitle: string | null = null;
 
   const flush = () => {
     if (lines.length === 0) return;
     messages.push({
       body: lines.join("\n"),
-      ...(buttons.length > 0 ? { replyMarkup: { inline_keyboard: buttons } } : {}),
+      parseMode: "HTML",
     });
     lines = [];
-    buttons = [];
     currentSectionTitle = null;
   };
 
@@ -1905,7 +1912,6 @@ function buildTelegramDigestDetailMessages(sections: TelegramDigestDetailSection
 
       lines = [...lines, ...prefix, ...itemLines];
       currentSectionTitle = section.title;
-      if (item.button) buttons.push([item.button]);
     }
   }
 
@@ -2285,6 +2291,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
       userId: input.userId,
       force: true,
       replyMarkup: part.replyMarkup,
+      parseMode: part.parseMode,
       client: db,
     });
 
@@ -4884,6 +4891,7 @@ export async function deliverTelegramNotificationEvent(
   organizationId: string,
   replyMarkup?: TelegramInlineKeyboardMarkup,
   client?: DbClient,
+  parseMode?: "HTML",
 ): Promise<NotificationEventRecord | null> {
   const db = client ?? getTelegramPlatformDb();
 
@@ -4893,7 +4901,7 @@ export async function deliverTelegramNotificationEvent(
     const context = await requireOrganizationContext();
     if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
     return withTenantTransaction(context, (tx) =>
-      deliverTelegramNotificationEvent(eventId, organizationId, replyMarkup, tx),
+      deliverTelegramNotificationEvent(eventId, organizationId, replyMarkup, tx, parseMode),
     );
   }
 
@@ -4930,6 +4938,7 @@ export async function deliverTelegramNotificationEvent(
       // Read-only receipt navigation remains available with mutations off.
       // Every mutating callback rechecks telegramMutationsEnabled server-side.
       replyMarkup,
+      parseMode,
     );
 
     if (!result.ok) {
@@ -4957,6 +4966,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
   dedupeKey?: string | null;
   force?: boolean;
   replyMarkup?: TelegramInlineKeyboardMarkup;
+  parseMode?: "HTML";
   client?: DbClient;
 }): Promise<NotificationEventRecord | null> {
   const event = await createNotificationEvent({
@@ -4979,7 +4989,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
     return event;
   }
 
-  return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup, input.client);
+  return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup, input.client, input.parseMode);
 }
 
 async function processTelegramWebhookUpdateInternal(
