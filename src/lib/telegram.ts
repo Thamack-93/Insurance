@@ -1594,9 +1594,8 @@ function formatTelegramDigestReceiptLine(item: TelegramReceiptItem, timeZone = D
         : `vence en ${diff} días`;
   return [
     `• ${item.clientName}`,
-    `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
-    `  Recibo ${item.receiptNumber} · ${dueLabel} · ${formatTelegramDate(item.dueDate, timeZone)}`,
-    `  Saldo pendiente: ${formatCurrency(Math.max(item.balance, 0), item.currency)}`,
+    `  ${formatTelegramDigestInsurerName(item.insurerName)} · Póliza ${item.policyNumber} · Recibo ${item.receiptNumber}`,
+    `  ${dueLabel.charAt(0).toLocaleUpperCase("es-MX")}${dueLabel.slice(1)} · ${formatTelegramDate(item.dueDate, timeZone)} · Saldo ${formatCurrency(Math.max(item.balance, 0), item.currency)}`,
   ].join("\n");
 }
 
@@ -1621,7 +1620,7 @@ function formatTelegramDigestRenewalLine(item: TelegramRenewalItem, timeZone = D
   const renewalLabel = formatTelegramRenewalLabel(diff);
   return [
     `• ${item.clientName}`,
-    `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
+    `  ${formatTelegramDigestInsurerName(item.insurerName)} · Póliza ${item.policyNumber}`,
     `  ${renewalLabel.charAt(0).toLocaleUpperCase("es-MX")}${renewalLabel.slice(1)} · ${formatTelegramDate(item.endDate, timeZone)}`,
   ].join("\n");
 }
@@ -1839,14 +1838,18 @@ function formatTelegramDigestDetailSections(input: {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;");
-  const withInlineLink = (body: string, label: string, url: string | null): TelegramDigestDetailItem => ({
-    body: `${body.split("\n").map((line, index) => {
+  const withInlineLink = (body: string, label: string, url: string | null): TelegramDigestDetailItem => {
+    const lines = body.split("\n").map((line, index) => {
       if (index === 0 && line.startsWith("• ")) {
         return `• <b>${escapeHtml(line.slice(2))}</b>`;
       }
       return escapeHtml(line);
-    }).join("\n")}${url ? `\n↗ <a href="${escapeHtml(url)}">${escapeHtml(label)}</a>` : ""}`,
-  });
+    });
+    if (url && lines.length > 0) {
+      lines[lines.length - 1] += ` · <a href="${escapeHtml(url)}">↗ ${escapeHtml(label)}</a>`;
+    }
+    return { body: lines.join("\n") };
+  };
   const receiptItems = (items: TelegramReceiptItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
     const url = buildPolicyDeskUrl(`/receipts/${item.id}`);
     return withInlineLink(formatTelegramDigestReceiptLine(item, timeZone), "Abrir recibo", url);
