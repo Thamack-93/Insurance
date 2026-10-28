@@ -1847,7 +1847,13 @@ function formatTelegramDigestDetailSections(input: {
     };
   });
   const taskItems = (items: Awaited<ReturnType<typeof getOpenWorkItems>>[number][]): TelegramDigestDetailItem[] =>
-    items.map((item) => ({ body: formatTelegramTaskLine(item) }));
+    items.map((item) => {
+      const url = buildPolicyDeskUrl(`/tasks/${item.id}`);
+      return {
+        body: formatTelegramTaskLine(item),
+        ...(url ? { button: { text: `Abrir pendiente · ${item.title}`.slice(0, 64), url } } : {}),
+      };
+    });
   const section = (title: string, result: TelegramListResult<unknown>, items: TelegramDigestDetailItem[]): TelegramDigestDetailSection | null =>
     result.total > 0 ? { title, total: result.total, items } : null;
 
@@ -1991,12 +1997,10 @@ function formatTelegramTaskLine(item: Awaited<ReturnType<typeof getOpenWorkItems
     item.policy ? `Póliza ${item.policy.policyNumber}` : null,
     item.insurer ? item.insurer.name : null,
   ].filter(Boolean);
-  const link = buildPolicyDeskUrl(`/tasks/${item.id}`);
-
   return [
     `• ${item.title}`,
     context.length > 0 ? `  ${context.join(" · ")}` : null,
-    `  ${dueLabel} · prioridad ${item.priority.toLowerCase()}${link ? ` · Abrir: ${link}` : ""}`,
+    `  ${dueLabel} · prioridad ${item.priority.toLowerCase()}`,
   ]
     .filter(Boolean)
     .join("\n");
