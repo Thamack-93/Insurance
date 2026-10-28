@@ -147,6 +147,7 @@ type TelegramDigestMessagePart = {
   title: string;
   body: string;
   replyMarkup?: TelegramInlineKeyboardMarkup;
+  parseMode?: "HTML";
 };
 
 type TelegramUser = {
@@ -1319,6 +1320,7 @@ export async function sendTelegramMessage(
   chatId: string,
   text: string,
   replyMarkup?: TelegramInlineKeyboardMarkup,
+  parseMode?: "HTML",
 ): Promise<TelegramSendResult> {
   const token = getTelegramBotToken();
   if (!token) {
@@ -1345,6 +1347,7 @@ export async function sendTelegramMessage(
         text: message.length <= 3900 ? message : `${message.slice(0, 3899)}…`,
         disable_web_page_preview: true,
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        ...(parseMode ? { parse_mode: parseMode } : {}),
       }),
       signal: controller.signal,
     });
@@ -1778,8 +1781,8 @@ function formatTelegramDigestSummary(input: {
 }) {
   const attention = [
     input.overdueReceipts.total > 0 ? `• Cobros vencidos: ${getTelegramSummaryLabel(input.overdueReceipts.total, "recibo")}` : null,
-    input.todayReceipts.total > 0 ? `• Vencen hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}` : null,
     input.pendingWorkItems.total > 0 ? `• Tareas vencidas: ${getTelegramSummaryLabel(input.pendingWorkItems.total, "tarea")}` : null,
+    input.todayReceipts.total > 0 ? `• Vencen hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}` : null,
   ].filter((line): line is string => line !== null);
   const upcoming = [
     input.upcomingReceipts.total > 0 ? `• Cobros próximos (14 días): ${getTelegramSummaryLabel(input.upcomingReceipts.total, "recibo")}` : null,
@@ -1815,7 +1818,6 @@ function formatTelegramDigestSummary(input: {
 
 type TelegramDigestDetailItem = {
   body: string;
-  button?: TelegramInlineKeyboardButton;
 };
 
 type TelegramDigestDetailSection = {
@@ -1832,48 +1834,58 @@ function formatTelegramDigestDetailSections(input: {
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
   pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
 }) {
+  const escapeHtml = (value: string) => value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;");
+  const withInlineLink = (body: string, label: string, url: string | null): TelegramDigestDetailItem => {
+    const lines = body.split("\n").map((line, index) => {
+      if (index === 0 && line.startsWith("• ")) {
+        return `• <b>${escapeHtml(line.slice(2))}</b>`;
+      }
+      return escapeHtml(line);
+    });
+    if (url) lines.push(`↗ <a href="${escapeHtml(url)}">${escapeHtml(label)}</a>`);
+    return { body: lines.join("\n") };
+  };
   const receiptItems = (items: TelegramReceiptItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
     const url = buildPolicyDeskUrl(`/receipts/${item.id}`);
-    return {
-      body: formatTelegramDigestReceiptLine(item, timeZone),
-      ...(url ? { button: { text: `Abrir recibo ${item.receiptNumber}`.slice(0, 64), url } } : {}),
-    };
+    return withInlineLink(formatTelegramDigestReceiptLine(item, timeZone), "Abrir recibo", url);
   });
   const renewalItems = (items: TelegramRenewalItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
     const url = buildPolicyDeskUrl(`/policies/${item.id}`);
-    return {
-      body: formatTelegramDigestRenewalLine(item, timeZone),
-      ...(url ? { button: { text: `Abrir póliza ${item.policyNumber}`.slice(0, 64), url } } : {}),
-    };
+    return withInlineLink(formatTelegramDigestRenewalLine(item, timeZone), "Abrir póliza", url);
   });
   const taskItems = (items: Awaited<ReturnType<typeof getOpenWorkItems>>[number][]): TelegramDigestDetailItem[] =>
-    items.map((item) => ({ body: formatTelegramTaskLine(item) }));
+    items.map((item) => {
+      const url = buildPolicyDeskUrl(`/tasks/${item.id}`);
+      return withInlineLink(formatTelegramTaskLine(item), "Abrir pendiente", url);
+    });
   const section = (title: string, result: TelegramListResult<unknown>, items: TelegramDigestDetailItem[]): TelegramDigestDetailSection | null =>
     result.total > 0 ? { title, total: result.total, items } : null;
 
   return [
     section("🔴 Cobros vencidos", input.overdueReceipts, receiptItems(input.overdueReceipts.items, input.timeZone)),
-    section("📍 Recibos que vencen hoy", input.todayReceipts, receiptItems(input.todayReceipts.items, input.timeZone)),
     section("⏰ Tareas vencidas", input.pendingWorkItems, taskItems(input.pendingWorkItems.items)),
+    section("📍 Recibos que vencen hoy", input.todayReceipts, receiptItems(input.todayReceipts.items, input.timeZone)),
     section("🧾 Cobros próximos · 14 días", input.upcomingReceipts, receiptItems(input.upcomingReceipts.items, input.timeZone)),
     section("🔄 Renovaciones · 30 días", input.upcomingRenewals, renewalItems(input.upcomingRenewals.items, input.timeZone)),
   ].filter((value): value is TelegramDigestDetailSection => value !== null);
 }
 
 function buildTelegramDigestDetailMessages(sections: TelegramDigestDetailSection[]) {
-  const messages: Array<{ body: string; replyMarkup?: TelegramInlineKeyboardMarkup }> = [];
+  const messages: Array<{ body: string; parseMode: "HTML" }> = [];
   let lines: string[] = [];
-  let buttons: TelegramInlineKeyboardButton[][] = [];
   let currentSectionTitle: string | null = null;
 
   const flush = () => {
     if (lines.length === 0) return;
     messages.push({
       body: lines.join("\n"),
-      ...(buttons.length > 0 ? { replyMarkup: { inline_keyboard: buttons } } : {}),
+      parseMode: "HTML",
     });
     lines = [];
-    buttons = [];
     currentSectionTitle = null;
   };
 
@@ -1899,7 +1911,6 @@ function buildTelegramDigestDetailMessages(sections: TelegramDigestDetailSection
 
       lines = [...lines, ...prefix, ...itemLines];
       currentSectionTitle = section.title;
-      if (item.button) buttons.push([item.button]);
     }
   }
 
@@ -1991,12 +2002,10 @@ function formatTelegramTaskLine(item: Awaited<ReturnType<typeof getOpenWorkItems
     item.policy ? `Póliza ${item.policy.policyNumber}` : null,
     item.insurer ? item.insurer.name : null,
   ].filter(Boolean);
-  const link = buildPolicyDeskUrl(`/tasks/${item.id}`);
-
   return [
     `• ${item.title}`,
     context.length > 0 ? `  ${context.join(" · ")}` : null,
-    `  ${dueLabel} · prioridad ${item.priority.toLowerCase()}${link ? ` · Abrir: ${link}` : ""}`,
+    `  ${dueLabel} · prioridad ${item.priority.toLowerCase()}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -2281,6 +2290,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
       userId: input.userId,
       force: true,
       replyMarkup: part.replyMarkup,
+      parseMode: part.parseMode,
       client: db,
     });
 
@@ -4880,6 +4890,7 @@ export async function deliverTelegramNotificationEvent(
   organizationId: string,
   replyMarkup?: TelegramInlineKeyboardMarkup,
   client?: DbClient,
+  parseMode?: "HTML",
 ): Promise<NotificationEventRecord | null> {
   const db = client ?? getTelegramPlatformDb();
 
@@ -4889,7 +4900,7 @@ export async function deliverTelegramNotificationEvent(
     const context = await requireOrganizationContext();
     if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
     return withTenantTransaction(context, (tx) =>
-      deliverTelegramNotificationEvent(eventId, organizationId, replyMarkup, tx),
+      deliverTelegramNotificationEvent(eventId, organizationId, replyMarkup, tx, parseMode),
     );
   }
 
@@ -4926,6 +4937,7 @@ export async function deliverTelegramNotificationEvent(
       // Read-only receipt navigation remains available with mutations off.
       // Every mutating callback rechecks telegramMutationsEnabled server-side.
       replyMarkup,
+      parseMode,
     );
 
     if (!result.ok) {
@@ -4953,6 +4965,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
   dedupeKey?: string | null;
   force?: boolean;
   replyMarkup?: TelegramInlineKeyboardMarkup;
+  parseMode?: "HTML";
   client?: DbClient;
 }): Promise<NotificationEventRecord | null> {
   const event = await createNotificationEvent({
@@ -4975,7 +4988,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
     return event;
   }
 
-  return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup, input.client);
+  return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup, input.client, input.parseMode);
 }
 
 async function processTelegramWebhookUpdateInternal(
