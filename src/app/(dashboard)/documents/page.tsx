@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
-import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
+import { SectionCard } from "@/components/pages-secondary/panels";
 import { Badge } from "@/components/ui/badge";
 import { documentTypeLabel } from "@/lib/ui-labels";
 import { Button } from "@/components/ui/button";
@@ -196,35 +196,18 @@ export default async function DocumentsPage({
           }
         />
 
-        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <MetricCard
-            title="Documentos"
-            value={totalCount}
-            description="Total de archivos indexados."
-            icon={FolderOpen}
-            tone="blue"
-          />
-          <MetricCard
-            title="Vinculados"
-            value={linkedDocuments}
-            description="Con vínculo a un cliente o expediente existente."
-            icon={Link2}
-            tone="emerald"
-          />
-          <MetricCard
-            title="Huérfanos"
-            value={orphanCount}
-            description="Sin vínculo a cliente, póliza o trámite."
-            icon={ShieldAlert}
-            tone="rose"
-          />
-          <MetricCard
-            title="Comprobantes"
-            value={paymentProofsCount}
-            description="Comprobantes de pago y soporte financiero."
-            icon={FileDigit}
-            tone="amber"
-          />
+        <section aria-label="Resumen de documentos" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[
+            { label: "PDFs por revisar", value: `${pendingInboxDocuments.length}${pendingInboxDocuments.length === 25 ? "+" : ""}`, icon: ShieldAlert, tone: "text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-950/30" },
+            { label: "Documentos", value: totalCount, icon: FolderOpen, tone: "text-sky-700 bg-sky-50 dark:text-sky-300 dark:bg-sky-950/30" },
+            { label: "Vinculados", value: linkedDocuments, icon: Link2, tone: "text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/30" },
+            { label: "Comprobantes", value: paymentProofsCount, icon: FileDigit, tone: "text-violet-700 bg-violet-50 dark:text-violet-300 dark:bg-violet-950/30" },
+          ].map(({ label, value, icon: Icon, tone }) => (
+            <div key={label} className="flex min-w-0 items-center gap-2.5 rounded-xl border bg-card px-3 py-2.5">
+              <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${tone}`}><Icon className="size-4" aria-hidden="true" /></span>
+              <span className="min-w-0"><span className="block truncate text-xs text-muted-foreground">{label}</span><span className="block text-lg font-semibold tabular-nums">{value}</span></span>
+            </div>
+          ))}
         </section>
 
         <SectionCard title="Bandeja de documentos" description="Revisa PDFs recientes y confirma manualmente su clasificación y expediente.">

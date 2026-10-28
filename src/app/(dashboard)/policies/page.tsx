@@ -21,8 +21,6 @@ import { policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { buildTableHref } from "@/lib/table-query";
 import { readPolicyListFilters } from "@/lib/list-filters";
-import { LocalNavigation } from "@/components/layout/local-navigation";
-import { policyNavigation } from "@/lib/navigation";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { policyObjectSearchTerms } from "@/lib/policy-identity";
 import { PolicyIdentity } from "@/components/policies/policy-identity";
@@ -181,11 +179,6 @@ export default async function PoliciesPage({
           }
         />
 
-        <LocalNavigation
-          label="Vistas de pólizas"
-          items={policyNavigation}
-        />
-
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Pólizas activas"
@@ -233,7 +226,7 @@ export default async function PoliciesPage({
           }
         >
           <div className="border-b border-border/70 px-4 py-3">
-            <div className="flex flex-col items-stretch gap-3">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <StatusFilterButtons
                 selectedValue={statusFilter ?? "ALL"}
                 options={policyStatusOptions.map((option) => ({
@@ -242,6 +235,7 @@ export default async function PoliciesPage({
                 }))}
               />
               <TableToolbar
+                className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end"
                 searchPlaceholder="Buscar por póliza, objeto asegurado, cliente o aseguradora..."
                 filters={[{ key: "type", label: "Tipo", options: policyTypeOptions }]}
                 tableControls={false}
