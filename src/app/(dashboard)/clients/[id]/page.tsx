@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { decodeRouteIdentifier } from "@/lib/route-identifier";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck, Cake } from "@/components/icons";
+import { Mail, Phone, BadgeInfo, ClipboardList, History, Pencil, ShieldCheck } from "@/components/icons";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
@@ -26,12 +26,14 @@ import { policyStatusOptions } from "@/lib/domain-options";
 import { POLICY_STATUSES } from "@/lib/domain-values";
 import { readAllowedTableParam } from "@/lib/table-query";
 import { formatCurrency, formatCurrencyExact, toNumber } from "@/lib/money";
-import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { getWorkItems } from "@/lib/work-queue";
 import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
 import { normalizeReturnTo } from "@/lib/return-to";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { policyObjectSearchTerms } from "@/lib/policy-identity";
 import { PolicyIdentity } from "@/components/policies/policy-identity";
+import { CalendarDays, ChevronDown } from "lucide-react";
+import { daysUntil, today } from "@/lib/dates";
 
 export default async function ClientDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const routeParams = await params;
@@ -86,7 +88,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       : {}),
   };
 
-  const [policies, receipts, workItems, claims, documents, referidos, activity, exactPolicyStats, exactReceiptCount, exactDocumentCount, policyStatusCounts, totalPolicyCount] = await Promise.all([
+  const [policies, receipts, workItems, claims, documents, referidos, activity, exactPolicyStats, exactReceiptCount, policyStatusCounts, totalPolicyCount, renewalCandidates] = await Promise.all([
     db.policy.findMany({
       where: policyWhere,
       include: {
@@ -144,9 +146,6 @@ export default async function ClientDetailPage({ params, searchParams }: { param
     db.receipt.count({
       where: { clientId: id, organizationId: scope.organizationId, status: { notIn: ["PAID", "CANCELLED"] } },
     }),
-    db.document.count({
-      where: { clientId: id, organizationId: scope.organizationId },
-    }),
     db.policy.groupBy({
       by: ["status"],
       where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
@@ -155,15 +154,17 @@ export default async function ClientDetailPage({ params, searchParams }: { param
     db.policy.count({
       where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
     }),
+    db.policy.findMany({
+      where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId }, status: "ACTIVE", endDate: { gte: today() } },
+      select: { id: true, policyNumber: true, policyType: true, endDate: true },
+      orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
+      take: 1,
+    }),
   ]);
 
-  const openWorkItemCount = await countWorkItems({
-    workItemTypes: ["TASK"],
-    statuses: OPEN_WORK_ITEM_STATUSES,
-    clientId: id,
-    organizationId: scope.organizationId,
-  }, db);
   const activePremium = toNumber(exactPolicyStats._sum.premiumAmount);
+  const nextRenewal = renewalCandidates[0] ?? null;
+  const nextRenewalDays = nextRenewal?.endDate ? daysUntil(nextRenewal.endDate) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -172,7 +173,16 @@ export default async function ClientDetailPage({ params, searchParams }: { param
         <PageHeader
           eyebrow="CRM"
           title={client.fullName}
-          description={`${client.type === "COMPANY" ? "Empresa" : "Persona"} · expediente central del cliente y su actividad vinculada.`}
+          description={client.type === "COMPANY" ? "Empresa · cartera y actividad vinculada." : "Persona · cartera y actividad vinculada."}
+          metadata={
+            <>
+              <StatusBadge status={client.status} entity="client" />
+              <Badge variant="outline" className="rounded-full">{client.type === "COMPANY" ? "Empresa" : "Persona"}</Badge>
+              {client.rfc ? <span className="inline-flex items-center gap-1.5"><BadgeInfo className="size-3.5" />RFC {client.rfc}</span> : null}
+              {client.phone ? <a href={`tel:${client.phone}`} className="inline-flex items-center gap-1.5 hover:text-primary"><Phone className="size-3.5" />{client.phone}</a> : null}
+              {client.email ? <a href={`mailto:${client.email}`} className="inline-flex items-center gap-1.5 hover:text-primary"><Mail className="size-3.5" />{client.email}</a> : null}
+            </>
+          }
           actions={
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "client", id: client.id }} />
@@ -195,121 +205,32 @@ export default async function ClientDetailPage({ params, searchParams }: { param
 
         <AuditByline createdById={client.createdById} updatedById={client.updatedById} />
 
-        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
           <MetricCard
             title="Pólizas activas"
             value={exactPolicyStats._count._all}
-            description={formatCurrencyExact(activePremium)}
+            description={`Prima total ${formatCurrencyExact(activePremium)}`}
             icon={ShieldCheck}
             tone="emerald"
           />
           <MetricCard
-            title="Recibos abiertos"
+            title="Recibos pendientes"
             value={exactReceiptCount}
             description="Pendientes de cobro, vencidos o en seguimiento."
             icon={ClipboardList}
             tone="amber"
           />
           <MetricCard
-            title="Tareas abiertas"
-            value={openWorkItemCount}
-            description="Pendientes operativos relacionados."
-            icon={BadgeInfo}
+            title="Última actividad"
+            value={activity[0] ? formatDate(activity[0].createdAt) : "—"}
+            description={activity[0]?.action ?? "Todavía no hay actividad registrada."}
+            icon={History}
             tone="blue"
-          />
-          <MetricCard
-            title="Documentos"
-            value={exactDocumentCount}
-            description="Expediente local vinculado al cliente."
-            icon={FileText}
-            tone="rose"
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-          <SectionCard title="Ficha del cliente" description="Datos de contacto y contexto básico.">
-            <div className="grid gap-4 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <StatusBadge status={client.status} entity="client" />
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    Alta {formatDate(client.createdAt)} · Actualizado {formatDate(client.updatedAt)}
-                  </p>
-                </div>
-                <Badge variant="outline" className="rounded-full">
-                  {client.type === "COMPANY" ? "Empresa" : "Persona"}
-                </Badge>
-              </div>
-              <div className="grid gap-3 text-sm">
-                <div className="flex items-center gap-3">
-                  <Mail className="size-4 text-muted-foreground" />
-                  <span>{client.email ?? "Sin correo"}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Phone className="size-4 text-muted-foreground" />
-                  <span>{client.phone ?? "Sin teléfono"}</span>
-                </div>
-                {client.birthDate ? (
-                  <div className="flex items-center gap-3">
-                    <Cake className="size-4 text-muted-foreground" />
-                    <span>
-                      Nacimiento: {formatBirthdayDate(client.birthDate)} de {client.birthDate.getUTCFullYear()} · {calculateAge(client.birthDate)} años
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 text-muted-foreground">
-                    <Cake className="size-4" />
-                    <span>Sin fecha de nacimiento</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-3">
-                  <MapPin className="size-4 text-muted-foreground" />
-                  <span>{client.address ?? "Sin dirección"}</span>
-                </div>
-              </div>
-              <SectionCard title="Datos fiscales y contacto">
-                <div className="space-y-3 px-4 py-3 text-sm text-muted-foreground">
-                  <div>
-                    <p className="font-medium text-foreground">Preferencia de contacto</p>
-                    <p className="mt-1">{client.preferredContactMethod ?? "No capturada"}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">RFC</p>
-                    <p className="mt-1">{client.rfc ?? "No capturado"}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Referidor</p>
-                    {client.referidor ? (
-                      <Link href={`/clients/${client.referidor.id}`} className="mt-1 inline-flex items-center gap-2 text-foreground hover:text-primary">
-                        {client.referidor.fullName}
-                        <StatusBadge status={client.referidor.status} entity="client" />
-                      </Link>
-                    ) : (
-                      <p className="mt-1">Sin referidor</p>
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Clientes referidos</p>
-                    <p className="mt-1">{client._count.referidos} cuenta{client._count.referidos === 1 ? "" : "s"}</p>
-                    {referidos.length > 0 ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {referidos.map((referido) => (
-                          <Link key={referido.id} href={`/clients/${referido.id}`}>
-                            <Badge variant="outline" className="rounded-full">
-                              {referido.fullName}
-                            </Badge>
-                          </Link>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </SectionCard>
-              {client.notes ? <p className="text-sm text-muted-foreground">{client.notes}</p> : null}
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Pólizas" description="Cartera completa del cliente. Filtra por estado; la lista ya no se recorta silenciosamente a 10 registros.">
+        <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(18rem,0.8fr)]">
+          <SectionCard title="Pólizas del cliente" description="Cartera completa. Ordenada por renovación y filtrable por estado.">
             <div className="border-b border-border/70 px-4 py-3">
               <div className="space-y-3">
                 <StatusFilterButtons
@@ -337,13 +258,14 @@ export default async function ClientDetailPage({ params, searchParams }: { param
               </div>
             </div>
             <div className="max-h-[30rem] overflow-x-hidden overflow-y-auto">
-              <Table className="min-w-[760px]">
+              <Table className="min-w-[900px]">
                 <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow className="bg-muted/40">
                     <TableHead>Póliza</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Aseguradora</TableHead>
                     <TableHead>Tipo</TableHead>
+                    <TableHead>Objeto asegurado</TableHead>
                     <TableHead>Renovación</TableHead>
                     <TableHead className="text-right">Prima</TableHead>
                   </TableRow>
@@ -351,12 +273,16 @@ export default async function ClientDetailPage({ params, searchParams }: { param
                 <TableBody>
                   {policies.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
                         No hay pólizas con este filtro.
                       </TableCell>
                     </TableRow>
-                  ) : policies.map((policy) => (
-                    <TableRow key={policy.id}>
+                  ) : policies.map((policy) => {
+                    const renewalDays = policy.endDate ? daysUntil(policy.endDate) : null;
+                    const isRenewalSoon = policy.status === "ACTIVE" && renewalDays !== null && renewalDays >= 0 && renewalDays <= 30;
+                    const insuredObject = policy.insuredAssets[0]?.description ?? "Sin objeto capturado";
+                    return (
+                    <TableRow key={policy.id} className={isRenewalSoon ? "bg-amber-50/70 hover:bg-amber-50 dark:bg-amber-950/20" : undefined}>
                       <TableCell>
                         <Link href={`/policies/${policy.id}`} className="font-medium text-foreground hover:text-primary">
                           <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
@@ -369,14 +295,74 @@ export default async function ClientDetailPage({ params, searchParams }: { param
                           {policyTypeLabel(policy.policyType)}
                         </Badge>
                       </TableCell>
-                      <TableCell>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</TableCell>
+                      <TableCell className="max-w-52 truncate" title={insuredObject}>{insuredObject}</TableCell>
+                      <TableCell>
+                        <span>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</span>
+                        {isRenewalSoon ? <Badge className="ml-2 bg-amber-100 text-amber-900 hover:bg-amber-100">{renewalDays === 0 ? "Renueva hoy" : `${renewalDays} días`}</Badge> : null}
+                      </TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(policy.premiumAmount, policy.currency)}</TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
           </SectionCard>
+
+          <div className="grid gap-4">
+            <SectionCard
+              title="Renovación próxima"
+              description={nextRenewal ? `${policyTypeLabel(nextRenewal.policyType)} · póliza ${nextRenewal.policyNumber}` : "Seguimiento de vigencias activas."}
+            >
+              <div className="space-y-4 p-4">
+                {nextRenewal?.endDate ? (
+                  <>
+                    <div className={nextRenewalDays !== null && nextRenewalDays <= 30
+                      ? "flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+                      : "flex items-center gap-3 rounded-xl border border-border bg-muted/40 p-3 text-foreground"}>
+                      <CalendarDays className="size-5 shrink-0" />
+                      <div>
+                        <p className="font-semibold">{nextRenewalDays === 0 ? "Vence hoy" : `Vence en ${nextRenewalDays} día${nextRenewalDays === 1 ? "" : "s"}`}</p>
+                        <p className="text-sm opacity-80">{formatDate(nextRenewal.endDate)}</p>
+                      </div>
+                    </div>
+                    <Button asChild className="w-full">
+                      <Link href={`/policies/${nextRenewal.id}`}>Abrir póliza</Link>
+                    </Button>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No hay renovaciones futuras registradas en las pólizas activas.</p>
+                )}
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Ficha del cliente" description="Datos complementarios y administrativos.">
+              <div className="p-4">
+                <details className="group">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                    <span>Datos fiscales y de cuenta</span>
+                    <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 text-sm sm:grid-cols-2">
+                    <div><p className="text-xs text-muted-foreground">Preferencia de contacto</p><p className="mt-1">{client.preferredContactMethod ?? "No capturada"}</p></div>
+                    <div><p className="text-xs text-muted-foreground">Nacimiento</p><p className="mt-1">{client.birthDate ? `${formatBirthdayDate(client.birthDate)} de ${client.birthDate.getUTCFullYear()} · ${calculateAge(client.birthDate)} años` : "Sin fecha registrada"}</p></div>
+                    <div><p className="text-xs text-muted-foreground">Dirección</p><p className="mt-1">{client.address ?? "Sin dirección"}</p></div>
+                    <div><p className="text-xs text-muted-foreground">Alta · actualizado</p><p className="mt-1">{formatDate(client.createdAt)} · {formatDate(client.updatedAt)}</p></div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Referidor</p>
+                      {client.referidor ? <Link href={`/clients/${client.referidor.id}`} className="mt-1 inline-flex items-center gap-2 hover:text-primary">{client.referidor.fullName}<StatusBadge status={client.referidor.status} entity="client" /></Link> : <p className="mt-1">Sin referidor</p>}
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Clientes referidos</p>
+                      <p className="mt-1">{client._count.referidos} cuenta{client._count.referidos === 1 ? "" : "s"}</p>
+                      {referidos.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{referidos.map((referido) => <Link key={referido.id} href={`/clients/${referido.id}`}><Badge variant="outline" className="rounded-full">{referido.fullName}</Badge></Link>)}</div> : null}
+                    </div>
+                    {client.notes ? <div className="sm:col-span-2"><p className="text-xs text-muted-foreground">Notas</p><p className="mt-1 whitespace-pre-wrap">{client.notes}</p></div> : null}
+                  </div>
+                </details>
+              </div>
+            </SectionCard>
+          </div>
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
