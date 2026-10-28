@@ -1594,8 +1594,9 @@ function formatTelegramDigestReceiptLine(item: TelegramReceiptItem, timeZone = D
         : `vence en ${diff} días`;
   return [
     `• ${item.clientName}`,
-    `  ${formatTelegramDigestInsurerName(item.insurerName)} · Póliza ${item.policyNumber} · Recibo ${item.receiptNumber}`,
-    `  ${dueLabel.charAt(0).toLocaleUpperCase("es-MX")}${dueLabel.slice(1)} · ${formatTelegramDate(item.dueDate, timeZone)} · Saldo ${formatCurrency(Math.max(item.balance, 0), item.currency)}`,
+    `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
+    `  Recibo ${item.receiptNumber} · ${dueLabel} · ${formatTelegramDate(item.dueDate, timeZone)}`,
+    `  Saldo pendiente: ${formatCurrency(Math.max(item.balance, 0), item.currency)}`,
   ].join("\n");
 }
 
@@ -1620,7 +1621,7 @@ function formatTelegramDigestRenewalLine(item: TelegramRenewalItem, timeZone = D
   const renewalLabel = formatTelegramRenewalLabel(diff);
   return [
     `• ${item.clientName}`,
-    `  ${formatTelegramDigestInsurerName(item.insurerName)} · Póliza ${item.policyNumber}`,
+    `  Póliza ${item.policyNumber} · ${formatTelegramDigestInsurerName(item.insurerName)}`,
     `  ${renewalLabel.charAt(0).toLocaleUpperCase("es-MX")}${renewalLabel.slice(1)} · ${formatTelegramDate(item.endDate, timeZone)}`,
   ].join("\n");
 }
@@ -1845,9 +1846,7 @@ function formatTelegramDigestDetailSections(input: {
       }
       return escapeHtml(line);
     });
-    if (url && lines.length > 0) {
-      lines[lines.length - 1] += ` · <a href="${escapeHtml(url)}">↗ ${escapeHtml(label)}</a>`;
-    }
+    if (url) lines.push(`↗ <a href="${escapeHtml(url)}">${escapeHtml(label)}</a>`);
     return { body: lines.join("\n") };
   };
   const receiptItems = (items: TelegramReceiptItem[], timeZone: string): TelegramDigestDetailItem[] => items.map((item) => {
