@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { subMonths } from "date-fns";
 import { ArrowRight, BadgeCheck, CircleDollarSign, Plus, ReceiptText, ShieldAlert } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
@@ -58,6 +59,9 @@ export default async function ReceiptsPage({
   const scope = await requireOrganizationPortfolioReadScopeOrRedirect();
   const now = today();
   const monthStart = businessStartOfMonth(now);
+  const previousMonthCutoff = subMonths(now, 1);
+  const previousMonthStart = businessStartOfMonth(previousMonthCutoff);
+  const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 6));
   const clearFiltersHref = buildTableHref("/receipts", params, {
     q: null,
     status: null,
@@ -79,7 +83,7 @@ export default async function ReceiptsPage({
   const pageDataPromise = withTenantOrganization(scope.organizationId, async (db) => {
     const organizationKind = await db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } });
     const core = await loadReceiptPageCore(db, scope.organizationId, { baseWhere, where, now, orderBy, page });
-    const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult] =
+    const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, monthlyDueReceiptCountsResult, previousMonthDueReceiptCountsResult, ytdDueReceiptCountsResult, paymentHistoryResult, reviewIssuesResult] =
       await settleReceiptReadsSequentially([
         () => db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
         () => resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
@@ -88,6 +92,21 @@ export default async function ReceiptsPage({
           where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
           include: { client: true, policy: true, insurer: true, endorsement: true },
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
+        }),
+        () => db.receipt.groupBy({
+          by: ["status"],
+          where: { ...scopedReceiptWhere, dueDate: { gte: monthStart, lte: now } },
+          _count: { _all: true },
+        }),
+        () => db.receipt.groupBy({
+          by: ["status"],
+          where: { ...scopedReceiptWhere, dueDate: { gte: previousMonthStart, lte: previousMonthCutoff } },
+          _count: { _all: true },
+        }),
+        () => db.receipt.groupBy({
+          by: ["status"],
+          where: { ...scopedReceiptWhere, dueDate: { gte: yearStart, lte: now } },
+          _count: { _all: true },
         }),
         () => db.payment.findMany({
           relationLoadStrategy: "join",
@@ -118,6 +137,9 @@ export default async function ReceiptsPage({
       agentContactResult,
       qualitasCapabilityResult,
       paidThisMonthResult,
+      monthlyDueReceiptCountsResult,
+      previousMonthDueReceiptCountsResult,
+      ytdDueReceiptCountsResult,
       paymentHistoryResult,
       reviewIssuesResult,
     };
@@ -129,7 +151,7 @@ export default async function ReceiptsPage({
     logError("receipts.page.data", error, { organizationId: scope.organizationId });
     throw error;
   }
-  const { organizationKind, core, agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult } = pageData;
+  const { organizationKind, core, agentContactResult, qualitasCapabilityResult, paidThisMonthResult, monthlyDueReceiptCountsResult, previousMonthDueReceiptCountsResult, ytdDueReceiptCountsResult, paymentHistoryResult, reviewIssuesResult } = pageData;
 
   const reportAuxiliaryFailure = (group: string) => (reason: unknown) => {
     logError(`receipts.page.${group}`, reason, { organizationId: scope.organizationId });
@@ -138,6 +160,9 @@ export default async function ReceiptsPage({
   const qualitasCapability = resolveReceiptAuxiliary(qualitasCapabilityResult, null, reportAuxiliaryFailure("qualitas-capability"));
   const qualitasMonitorFeatureEnabled = isQualitasReceiptMonitorEnabled() && Boolean(qualitasCapability?.enabled);
   const paidThisMonth = resolveReceiptAuxiliary(paidThisMonthResult, [], reportAuxiliaryFailure("paid-this-month"));
+  const monthlyDueReceiptCounts = resolveReceiptAuxiliary(monthlyDueReceiptCountsResult, [], reportAuxiliaryFailure("monthly-due-receipts"));
+  const previousMonthDueReceiptCounts = resolveReceiptAuxiliary(previousMonthDueReceiptCountsResult, [], reportAuxiliaryFailure("previous-month-due-receipts"));
+  const ytdDueReceiptCounts = resolveReceiptAuxiliary(ytdDueReceiptCountsResult, [], reportAuxiliaryFailure("ytd-due-receipts"));
   const paymentHistory = resolveReceiptAuxiliary(paymentHistoryResult, [], reportAuxiliaryFailure("payment-history"));
   const reviewIssues = resolveReceiptAuxiliary(reviewIssuesResult, [], reportAuxiliaryFailure("review-issues"));
   const {
@@ -153,10 +178,13 @@ export default async function ReceiptsPage({
   const outstandingAmount = toNumber(outstandingAgg._sum.amount);
   const overdueAmount = toNumber(overdueAgg._sum.amount);
   const paidAmountMonth = paidThisMonth.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
-  const collectionRate =
-    openCount + paidThisMonth.length > 0
-      ? Math.round((paidThisMonth.length / (openCount + paidThisMonth.length)) * 100)
-      : 100;
+  const monthCollection = receiptCollectionSnapshot(monthlyDueReceiptCounts);
+  const previousMonthCollection = receiptCollectionSnapshot(previousMonthDueReceiptCounts);
+  const ytdCollection = receiptCollectionSnapshot(ytdDueReceiptCounts);
+  const collectionRateDeltaLabel = monthCollection.rate !== null && previousMonthCollection.rate !== null
+    ? `${monthCollection.rate > previousMonthCollection.rate ? "+" : ""}${monthCollection.rate - previousMonthCollection.rate} pp`
+    : "s/d";
+  const formatCollectionRate = (rate: number | null) => rate === null ? "s/d" : `${rate}%`;
 
   const collectableRows: CollectableReceipt[] = pagedReceipts
     .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
@@ -243,9 +271,15 @@ export default async function ReceiptsPage({
           tone="blue"
         />
         <MetricCard
-          title="Tasa de cobro"
-          value={`${collectionRate}%`}
-          description="Pagados vs. abiertos del mes."
+          title="Cobro del mes"
+          value={formatCollectionRate(monthCollection.rate)}
+          description={(
+            <>
+              <span className="block">Mes actual a hoy: {monthCollection.paid}/{monthCollection.total}</span>
+              <span className="block">Mismo corte mes anterior: {formatCollectionRate(previousMonthCollection.rate)} ({collectionRateDeltaLabel})</span>
+              <span className="block">YTD a hoy: {formatCollectionRate(ytdCollection.rate)} ({ytdCollection.paid}/{ytdCollection.total})</span>
+            </>
+          )}
           icon={ReceiptText}
           tone="amber"
         />
@@ -660,4 +694,12 @@ async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: 
         take: PAGE_SIZE,
       });
   return { openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts };
+}
+
+function receiptCollectionSnapshot(counts: Array<{ status: string; _count: { _all: number } }>) {
+  const paid = counts.find(({ status }) => status === "PAID")?._count._all ?? 0;
+  const total = counts
+    .filter(({ status }) => status !== "CANCELLED")
+    .reduce((sum, { _count }) => sum + _count._all, 0);
+  return { paid, total, rate: total > 0 ? Math.round((paid / total) * 100) : null };
 }
