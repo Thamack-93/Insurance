@@ -23,8 +23,6 @@ export type GlobalSearchResult = {
   details?: string[];
   policyObjectDescription?: string;
   parentLabel?: string;
-  clientName?: string;
-  clientHref?: string;
   hint?: string;
   href: string;
   match?: SearchMatch;
@@ -294,7 +292,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     clientName: string | null;
     insurerName: string | null;
   };
-  type ReceiptRow = RowWithId & { receiptNumber: string; status: string; clientId: string; clientName: string | null };
+  type ReceiptRow = RowWithId & { receiptNumber: string; status: string; clientName: string | null };
   type WorkItemRow = RowWithId & {
     sourceType: string;
     sourceId: string;
@@ -302,11 +300,10 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     title: string;
     taskType: string | null;
     status: string;
-    clientId: string | null;
     notes: string | null;
     clientName: string | null;
   };
-  type ClaimRow = RowWithId & { folio: string; claimType: string; notes: string | null; clientId: string; clientName: string | null };
+  type ClaimRow = RowWithId & { folio: string; claimType: string; notes: string | null; clientName: string | null };
   type InsurerRow = RowWithId & { name: string; contactName: string | null; notes: string | null };
   type DocumentRow = RowWithId & {
     fileName: string;
@@ -399,7 +396,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     })(),
     rawSearch<ReceiptRow>(
       "Receipt",
-      ["id", "receiptNumber", "status", "clientId", "updatedAt"],
+      ["id", "receiptNumber", "status", "updatedAt"],
       ["receiptNumber"],
       needle,
       5,
@@ -411,7 +408,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     ),
     rawSearch<WorkItemRow>(
       "WorkItem",
-      ["id", "folio", "title", "taskType", "status", "notes", "clientId", "updatedAt"],
+      ["id", "folio", "title", "taskType", "status", "notes", "updatedAt"],
       ["folio", "title", "taskType", "notes"],
       needle,
       5,
@@ -423,7 +420,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     ),
     rawSearch<ClaimRow>(
       "Claim",
-      ["id", "folio", "claimType", "notes", "clientId", "updatedAt"],
+      ["id", "folio", "claimType", "notes", "updatedAt"],
       ["folio", "claimType", "notes"],
       needle,
       5,
@@ -484,8 +481,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
       type: "policy",
       title: p.policyNumber,
       subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${policyTypeLabel(p.policyType)} · ${formatPolicyStatusLabel(p.status)}`,
-      clientName: p.clientName ?? undefined,
-      clientHref: `/clients/${p.clientId}`,
       hint: `Vence ${formatDate(p.endDate)}`,
       details: cleanStrings([
         formatPolicyValidity(p.startDate, p.endDate),
@@ -506,8 +501,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
       type: "receipt",
       title: r.receiptNumber,
       subtitle: `${r.clientName ?? "Sin cliente"} · ${statusLabel(r.status, "receipt")}`,
-      clientName: r.clientName ?? undefined,
-      clientHref: `/clients/${r.clientId}`,
       details: cleanStrings([statusLabel(r.status, "receipt")]),
       href: `/receipts/${r.id}`,
       match,
@@ -521,8 +514,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
       type: "workItem",
       title: w.title,
       subtitle: `${w.clientName ?? "Sin cliente"} · ${statusLabel(w.status, "workItem")}`,
-      clientName: w.clientName ?? undefined,
-      clientHref: w.clientId ? `/clients/${w.clientId}` : undefined,
       details: cleanStrings([w.folio, w.taskType, w.sourceType, w.sourceId]),
       href: `/tasks/${w.sourceId ?? w.id}`,
       match,
@@ -536,8 +527,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
       type: "claim",
       title: cl.folio,
       subtitle: `${cl.clientName ?? "Sin cliente"} · ${cl.claimType}`,
-      clientName: cl.clientName ?? undefined,
-      clientHref: `/clients/${cl.clientId}`,
       details: cleanStrings([cl.claimType, cl.notes]),
       href: `/claims/${cl.id}`,
       match,

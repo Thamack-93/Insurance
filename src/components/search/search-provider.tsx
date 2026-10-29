@@ -24,8 +24,6 @@ export type SearchResult = {
   title: string;
   subtitle?: string;
   parentLabel?: string;
-  clientName?: string;
-  clientHref?: string;
   hint?: string;
   href: string;
   match?: SearchResultMatch;

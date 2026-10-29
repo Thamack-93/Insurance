@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { memo } from "react";
-import Link from "next/link";
 import {
   Search,
   Users,
@@ -86,43 +85,31 @@ export const SearchResults = memo(function SearchResults() {
                     flatIndex += 1;
                     const resultIndex = flatIndex;
                     return (
-                    <div
+                    <button
                       key={result.id}
-                      className={`flex w-full items-start gap-3 px-4 py-2 transition-colors hover:bg-muted/40 ${activeResultIndex === resultIndex ? "bg-muted/60" : ""}`}
+                      id={`global-search-result-${resultIndex}`}
+                      type="button"
+                      data-search-result
+                      className={`flex w-full items-start gap-3 px-4 py-2 text-left transition-colors hover:bg-muted/40 ${activeResultIndex === resultIndex ? "bg-muted/60" : ""}`}
+                      onClick={() => {
+                        router.push(result.href);
+                        clearSearch();
+                      }}
                     >
                       <div className="mt-0.5 flex-shrink-0">
                         <Icon className="size-4 text-muted-foreground" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <button
-                            id={`global-search-result-${resultIndex}`}
-                            type="button"
-                            data-search-result
-                            aria-label={`Abrir ${entityLabels[result.type]} ${result.title}`}
-                            className="truncate text-left text-sm font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            onClick={() => {
-                              router.push(result.href);
-                              clearSearch();
-                            }}
-                          >
+                          <p className="truncate text-sm font-medium">
                             <Highlight text={result.title} query={searchQuery} />
-                          </button>
+                          </p>
                           <Badge variant="secondary" className="text-xs">
                             {entityLabels[result.type]}
                           </Badge>
                         </div>
                         {result.subtitle && (
-                          <p className="truncate text-xs text-muted-foreground">
-                            {result.clientName && result.clientHref ? (
-                              <>
-                                <Link href={result.clientHref} onClick={clearSearch} className="font-medium text-primary underline underline-offset-2 hover:decoration-2">
-                                  {result.clientName}
-                                </Link>
-                                {result.subtitle.startsWith(`${result.clientName} · `) ? ` · ${result.subtitle.slice(result.clientName.length + 3)}` : null}
-                              </>
-                            ) : result.subtitle}
-                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{result.subtitle}</p>
                         )}
                         {result.hint ? <p className="truncate text-xs text-muted-foreground">{result.hint}</p> : null}
                         {result.match && (
@@ -132,7 +119,7 @@ export const SearchResults = memo(function SearchResults() {
                           </p>
                         )}
                       </div>
-                    </div>
+                    </button>
                     );
                   })}
                 </div>
