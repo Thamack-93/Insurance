@@ -61,12 +61,10 @@ test.describe("PolicyDesk master shell", () => {
     await authenticatePageAsAdmin(page);
 
     await page.goto("/policies");
-    await page.getByRole("navigation", { name: "Vistas de pólizas" })
-      .getByRole("link", { name: "Activas", exact: true })
-      .click();
+    const policyFilters = page.getByRole("group", { name: "Filtrar por estado" });
+    await policyFilters.getByRole("button", { name: /^Activa/ }).click();
     await expect(page).toHaveURL(/\/policies\?status=ACTIVE$/);
-    await expect(page.getByRole("navigation", { name: "Vistas de pólizas" })
-      .getByRole("link", { name: "Activas", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(policyFilters.getByRole("button", { name: /^Activa/ })).toHaveAttribute("aria-pressed", "true");
 
     await page.goto("/reports");
     await page.getByRole("navigation", { name: "Secciones de reportes" })

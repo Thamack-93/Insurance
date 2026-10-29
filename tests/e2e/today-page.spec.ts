@@ -14,12 +14,20 @@ test.describe("Today operations center", () => {
     await expect(page.getByRole("link", { name: "Insights" })).toBeVisible();
     await expect(page.getByText("PolicyDesk").first()).toBeVisible();
 
+    await expect(page.getByRole("heading", { name: "Requiere acción hoy" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Otros cobros próximos" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Otras renovaciones" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Cobrar recibos" })).toBeVisible();
+
+    await page.getByText("Comisiones e indicadores", { exact: true }).click();
     const summary = page.getByRole("region", { name: "Resumen operativo" });
     await expect(summary.getByRole("link")).toHaveCount(6);
     await expect(summary.getByText("Próx. 7 días", { exact: true })).toBeVisible();
-    const quickActions = page.getByRole("region", { name: "Acciones rápidas" });
-    await expect(quickActions.getByRole("button", { name: "Registrar pago" })).toBeVisible();
-    await expect(quickActions.getByRole("link", { name: "Capturar póliza" })).toBeVisible();
+
+    await page.getByText("Más acciones", { exact: true }).click();
+    const moreActions = page.locator("details").filter({ hasText: "Más acciones" });
+    await expect(moreActions.getByRole("button", { name: "Registrar pago con Nora" })).toBeVisible();
+    await expect(moreActions.getByRole("link", { name: "Capturar póliza" })).toBeVisible();
   });
 
   test("keeps mobile navigation keyboard-operable", async ({ page }) => {

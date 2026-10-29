@@ -42,15 +42,18 @@ test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
     // Confirm row is rendered.
     await expect(page.getByRole("link", { name: currentSeeded.receiptNumber })).toBeVisible();
 
-    // Open the QuickPaymentDialog (button labeled "Pagar").
-    await page.getByRole("button", { name: /^pagar$/i }).first().click();
+    // Open the QuickPaymentDialog from its current collection action.
+    await page.getByRole("button", { name: "Registrar pago", exact: true }).click();
 
     // Dialog should display the receipt context.
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByText(currentSeeded.receiptNumber).first()).toBeVisible();
 
-    // Confirm payment — primary button starts with "Pagar " followed by the formatted amount.
-    const action = await captureServerAction(page, () => page.getByRole("button", { name: /^pagar\s/i }).click());
+    await page.getByRole("button", { name: "Revisar pago", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Confirmar pago", exact: true })).toBeVisible();
+
+    // Confirm payment using the dialog's accessible label, which includes the amount.
+    const action = await captureServerAction(page, () => page.getByRole("button", { name: /^Confirmar pago de /i }).click());
     console.log("Quick payment server action:", action);
 
     // Dialog closes after success.

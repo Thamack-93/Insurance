@@ -373,7 +373,8 @@ test.describe("operation queue context", () => {
       const expiredPolicyLink = page.getByRole("link", { name: new RegExp(fixture.policyNumber) });
       await expect(expiredPolicyLink).toBeVisible();
       await expect(expiredPolicyLink).toHaveAttribute("href", `/policies/${fixture.policyId}`);
-      await expect(page.getByRole("link", { name: "Vigencias terminadas", exact: true })).toBeVisible();
+      await expect(page.getByRole("group", { name: "Filtrar por estado" })
+        .getByRole("button", { name: /^Expirada/ })).toHaveAttribute("aria-pressed", "true");
       await expect(page.getByRole("columnheader", { name: "Fin de vigencia" })).toBeVisible();
       await expect(page.getByRole("cell", { name: /Terminó:/ }).first()).toBeVisible();
       await expect(page.getByText("Vigencias terminadas para consulta histórica", { exact: false })).toBeVisible();
