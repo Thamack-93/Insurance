@@ -1,3 +1,7 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
 import { CarFront, ChevronDown, CircleDollarSign, FileText, MapPin, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { getPolicyRiskDetailEntries, policyRiskDetailsSchema, type PolicyRiskDetails } from "@/lib/policy-risk-details";
@@ -22,6 +26,7 @@ type InsuredPerson = Extract<PolicyRiskDetails, { policyType: "GMM" }>["data"]["
 
 type PolicyRiskOverviewProps = {
   policyType: string;
+  clientId: string;
   clientName: string;
   insurerName: string;
   insuredObject: string | null;
@@ -189,6 +194,7 @@ function HistoricalDescription({ value }: { value: string | null }) {
 
 export function PolicyRiskOverview({
   policyType,
+  clientId,
   clientName,
   insurerName,
   insuredObject,
@@ -203,6 +209,7 @@ export function PolicyRiskOverview({
   beneficiaryInfo,
   commissionRateOverride,
 }: PolicyRiskOverviewProps) {
+  const [showAllVehicles, setShowAllVehicles] = useState(false);
   const parsed = policyRiskDetailsSchema.safeParse(riskDetails);
   const riskDetailEntries = getPolicyRiskDetailEntries(riskDetails);
   const details = parsed.success && parsed.data.policyType === policyType ? parsed.data : null;
@@ -241,7 +248,10 @@ export function PolicyRiskOverview({
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{policyType === "GMM" ? "Personas aseguradas" : policyType === "DANOS" ? "Bienes asegurados" : policyType === "AUTO" ? (vehicleRows.length > 1 ? "Flotilla" : "Vehículo asegurado") : "Objeto asegurado"}</p>
             {policyType !== "AUTO" && policyType !== "DANOS" && policyType !== "GMM" ? <div className="mt-2"><HistoricalDescription value={insuredObject || fallbackAssets[0]?.description || insuredParties[0]?.fullName || null} /></div> : null}
-            <p className="mt-1 text-xs text-muted-foreground">{clientName} · {insurerName}{policyType === "AUTO" ? "" : ` · ${displayedRiskType}`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              <Link href={`/clients/${clientId}`} className="text-primary underline underline-offset-2 hover:decoration-2">{clientName}</Link>
+              {` · ${insurerName}`}{policyType === "AUTO" ? "" : ` · ${displayedRiskType}`}
+            </p>
           </div>
           {policyType === "AUTO" && vehicleRows.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">{vehicleRows.length} {vehicleRows.length === 1 ? "vehículo" : "vehículos"}</span> : null}
           {policyType === "DANOS" && locationRows.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">{locationRows.length} {locationRows.length === 1 ? "ubicación" : "ubicaciones"}</span> : null}
@@ -252,13 +262,19 @@ export function PolicyRiskOverview({
           vehicleRows.length ? (
             <div className="space-y-3">
               <ul className="grid gap-2 sm:grid-cols-2">
-                {vehicleRows.slice(0, 3).map(({ vehicle, unitClass }, index) => <VehicleCard key={`${vehicle.vin}-${vehicle.plates}-${index}`} vehicle={vehicle} unitClass={unitClass} index={index} />)}
+                {(showAllVehicles ? vehicleRows : vehicleRows.slice(0, 3)).map(({ vehicle, unitClass }, index) => <VehicleCard key={`${vehicle.vin}-${vehicle.plates}-${index}`} vehicle={vehicle} unitClass={unitClass} index={index} />)}
               </ul>
-              <RemainingRows label={`Ver todos los ${vehicleRows.length} vehículos`} count={vehicleRows.length - 3}>
-                <ul className="grid gap-2 sm:grid-cols-2">
-                  {vehicleRows.slice(3).map(({ vehicle, unitClass }, index) => <VehicleCard key={`${vehicle.vin}-${vehicle.plates}-${index + 3}`} vehicle={vehicle} unitClass={unitClass} index={index + 3} />)}
-                </ul>
-              </RemainingRows>
+              {vehicleRows.length > 3 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllVehicles((current) => !current)}
+                  aria-expanded={showAllVehicles}
+                  className="inline-flex min-h-8 items-center gap-1 text-sm font-medium text-primary hover:underline hover:underline-offset-4"
+                >
+                  {showAllVehicles ? "Mostrar menos" : `Ver todos los ${vehicleRows.length} vehículos`}
+                  <ChevronDown aria-hidden className={`size-4 transition-transform ${showAllVehicles ? "rotate-180" : ""}`} />
+                </button>
+              ) : null}
             </div>
           ) : <HistoricalDescription value={insuredObject || null} />
         ) : null}

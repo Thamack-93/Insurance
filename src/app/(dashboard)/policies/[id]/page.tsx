@@ -272,6 +272,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
 
         <PolicyRiskOverview
           policyType={policy.policyType}
+          clientId={policy.clientId}
           clientName={policy.client.fullName}
           insurerName={policy.insurer.name}
           insuredObject={policy.insuredObject}
