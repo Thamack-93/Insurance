@@ -16,7 +16,8 @@ import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import { priorityLabel, statusLabel } from "@/lib/status";
 import { documentTypeLabel, workItemTypeLabel } from "@/lib/ui-labels";
-import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { documentOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { DocumentPreviewDialog } from "@/components/documents/document-preview-dialog";
 
 export default async function WorkItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -25,7 +26,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
     const workItem = await findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId);
     if (!workItem) return { workItem: null, documents: [], activityLogs: [] };
     const [documents, activityLogs] = await Promise.all([
-      db.document.findMany({ where: { organizationId: scope.organizationId, taskId: workItem.sourceId ?? workItem.id }, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] }),
+      db.document.findMany({ where: { ...documentOperationalWhere(scope.portfolioOwnerId, scope.organizationId), taskId: workItem.sourceId ?? workItem.id }, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] }),
       db.activityLog.findMany({ where: { entityId: { in: [id, workItem.id] }, entityType: "WorkItem", organizationId: scope.organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10 }),
     ]);
     return { workItem, documents, activityLogs };
@@ -196,14 +197,20 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
                     <TableHead>Archivo</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Fecha</TableHead>
+                    <TableHead>Documento</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {documents.map((document) => (
                     <TableRow key={document.id}>
-                      <TableCell className="font-medium">{document.fileName}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link href={`/documents?q=${encodeURIComponent(document.fileName)}`} className="hover:text-primary">{document.fileName}</Link>
+                      </TableCell>
                       <TableCell>{documentTypeLabel(document.documentType)}</TableCell>
                       <TableCell>{formatDate(document.uploadedAt)}</TableCell>
+                      <TableCell>
+                        <DocumentPreviewDialog documentId={document.id} fileName={document.fileName} mimeType={document.mimeType} triggerLabel="Abrir documento" />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

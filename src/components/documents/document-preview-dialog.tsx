@@ -35,10 +35,11 @@ export function DocumentPreviewDialog({
   const downloadUrl = `/api/documents/${documentId}/download`;
   const isPdf = mimeType === "application/pdf";
   const isImage = mimeType.startsWith("image/");
+  const accessibleTriggerLabel = triggerLabel === "Vista previa" ? `Vista previa de ${fileName}` : `${triggerLabel} ${fileName}`;
 
   if (disabled) {
     return (
-      <Button variant="outline" size={triggerSize} className="gap-1.5" disabled aria-label={`Vista previa de ${fileName} deshabilitada`}>
+        <Button variant="outline" size={triggerSize} className="gap-1.5" disabled aria-label={`${accessibleTriggerLabel} deshabilitada`}>
         <Eye className="size-4" />
         {triggerLabel}
       </Button>
@@ -49,7 +50,7 @@ export function DocumentPreviewDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button variant="outline" size={triggerSize} className="gap-1.5" aria-label={`Vista previa de ${fileName}`} />
+          <Button variant="outline" size={triggerSize} className="gap-1.5" aria-label={accessibleTriggerLabel} />
         }
       >
         <Eye className="size-4" />

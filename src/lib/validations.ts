@@ -249,6 +249,15 @@ export const workItemSchema = z.object({
   notes: optionalText,
 });
 
+export const documentFollowUpSchema = z.object({
+  title: z.string().trim().min(3, "Escribe un título de al menos 3 caracteres.").max(200, "El título no puede superar 200 caracteres."),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Selecciona una fecha límite."),
+  notes: optionalText,
+}).refine((values) => isValidDateOnly(values.dueDate), {
+  message: "La fecha límite no es válida.",
+  path: ["dueDate"],
+});
+
 export const insurerSchema = z.object({
   name: z.string().trim().min(2, "Escribe el nombre de la aseguradora."),
   portalUrl: optionalText,
@@ -281,5 +290,6 @@ export type ReceiptFormValues = z.infer<typeof receiptSchema>;
 export type CommissionRuleFormValues = z.infer<typeof commissionRuleSchema>;
 export type EndorsementFormValues = z.infer<typeof endorsementSchema>;
 export type WorkItemFormValues = z.infer<typeof workItemSchema>;
+export type DocumentFollowUpValues = z.infer<typeof documentFollowUpSchema>;
 export type InsurerFormValues = z.infer<typeof insurerSchema>;
 export type ClaimFormValues = z.infer<typeof claimSchema>;
