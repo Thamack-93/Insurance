@@ -302,7 +302,7 @@ export async function createDocumentFollowUp(documentId: string, formData: FormD
       const folio = `PD-${now.getUTCFullYear()}-${taskId.slice(0, 8).toUpperCase()}`;
       const notes = normalizeOptionalText(values.notes);
 
-      await tx.task.create({
+      await tx.task.create({ // DOCUMENT_FOLLOW_UP_TASK_COMPAT_WRITE: paired atomically with the canonical WorkItem below.
         data: {
           id: taskId,
           organizationId: context.organizationId,
