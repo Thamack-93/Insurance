@@ -56,7 +56,7 @@ export function CollectableReceipts({ receipts, returnTo, isDemo = false, qualit
     <BulkActionsProvider>
       <div className="overflow-hidden rounded-xl border border-border/70 bg-card">
         <BulkToolbar receipts={receipts} />
-        <div className="hidden grid-cols-[minmax(16rem,1.5fr)_minmax(13rem,1fr)_9rem_9rem_auto] gap-4 border-y bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground xl:grid">
+        <div className="hidden grid-cols-[minmax(14rem,1fr)_minmax(18rem,2fr)_7rem_6.5rem_20rem] gap-4 border-y bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground xl:grid">
           <span>Recibo</span><span>Cliente y póliza</span><span>Vencimiento</span><span className="text-right">Importe</span><span className="w-48 text-right">Acciones</span>
         </div>
         <div className="divide-y divide-border/70">
@@ -170,7 +170,7 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
   return (
     <>
     <div
-      className="grid grid-cols-1 gap-3 px-4 py-4 xl:grid-cols-[minmax(16rem,1.5fr)_minmax(13rem,1fr)_9rem_9rem_auto] xl:items-center xl:gap-4"
+      className="grid grid-cols-1 gap-3 px-4 py-4 xl:grid-cols-[minmax(14rem,1fr)_minmax(18rem,2fr)_7rem_6.5rem_20rem] xl:items-center xl:gap-4"
       data-selected={isSelected}
     >
       <div className="flex min-w-0 flex-1 items-start gap-3">
