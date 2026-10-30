@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
 
-type Classification = "runtime-write" | "legacy-read-compat" | "migration-only";
+type Classification = "runtime-write" | "legacy-read-compat" | "compatibility-write" | "migration-only";
 
 type StaticReference = {
   file: string;
@@ -53,8 +53,12 @@ const AUDIT_COMPAT_FILES = new Set(["src/lib/tenant-organization-foundation.ts"]
 const DOCUMENT_TASK_RELATION_FILES = new Set([
   "src/app/(dashboard)/documents/actions.ts",
   "src/components/documents/document-inbox.tsx",
+  "src/components/documents/create-document-follow-up-dialog.tsx",
+  "src/lib/document-follow-up.ts",
 ]);
 const TASK_ENTITY_WRITE = /\b(?:db|tx)\.task\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)/;
+const DOCUMENT_FOLLOW_UP_COMPAT_WRITER = "DOCUMENT_FOLLOW_UP_TASK_COMPAT_WRITE";
+const DOCUMENT_FOLLOW_UP_COMPAT_WRITER_FILES = new Set(["src/app/(dashboard)/tasks/actions.ts"]);
 
 // DEMO seed/reset paths intentionally recreate the historical Task fixture so
 // operators can inspect legacy compatibility; they are not runtime writes.
@@ -81,7 +85,12 @@ function classify(file: string, snippet: string): Classification {
   }
   // Keep actual Task entity mutations forbidden even in files that still
   // handle the Document.taskId compatibility relation.
-  if (TASK_ENTITY_WRITE.test(snippet)) return "runtime-write";
+  if (TASK_ENTITY_WRITE.test(snippet)) {
+    if (DOCUMENT_FOLLOW_UP_COMPAT_WRITER_FILES.has(file) && snippet.includes(DOCUMENT_FOLLOW_UP_COMPAT_WRITER)) {
+      return "compatibility-write";
+    }
+    return "runtime-write";
+  }
   if (DOCUMENT_TASK_RELATION_FILES.has(file)
     && /\btaskId\b/.test(snippet)
     && !/\b(?:sourceType|entityType):\s*["']Task["']/.test(snippet)) {
@@ -179,10 +188,12 @@ async function main() {
   const references = await collectStaticReferences();
   const data = staticOnly ? null : await auditData();
   const runtimeWrites = references.filter((reference) => reference.classification === "runtime-write");
+  const compatibilityWrites = references.filter((reference) => reference.classification === "compatibility-write");
   const conflicts = data ? data.workItemsPointingToMissingTask + data.duplicateLegacyMappings : 0;
   const report = {
     status: runtimeWrites.length || conflicts ? "FAIL" : "PASS",
     runtimeWrites,
+    compatibilityWrites,
     staticReferences: references.filter((reference) => reference.classification !== "runtime-write"),
     data,
     notes: [
@@ -198,6 +209,7 @@ async function main() {
   } else {
     console.log(`Auditoría Task -> WorkItem: ${report.status}`);
     console.log(`- referencias legacy permitidas: ${report.staticReferences.length}`);
+    console.log(`- escrituras de compatibilidad Task/WorkItem permitidas: ${compatibilityWrites.length}`);
     console.log(`- escrituras runtime no permitidas: ${runtimeWrites.length}`);
     console.log(`- Task sin WorkItem histórico: ${data?.tasksWithoutLegacyWorkItem ?? "omitido"}`);
     console.log(`- documentos ligados al campo legacy taskId: ${data?.legacyDocumentCount ?? "omitido"}`);

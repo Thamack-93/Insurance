@@ -7,12 +7,17 @@ import { createNotification } from "@/lib/notifications";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { mapTaskStatusToWorkItemStatus } from "@/lib/work-items";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
-import { workItemSchema, type WorkItemFormValues } from "@/lib/validations";
+import { documentFollowUpSchema, workItemSchema, type DocumentFollowUpValues, type WorkItemFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { requireOrganizationContext, assertOrganizationContextInTransaction, type OrganizationContext, withTenantTransaction, type TenantDb } from "@/lib/organization-context";
 import {
+  documentOperationalWhere,
   workItemPortfolioWhere,
 } from "@/lib/portfolio-access";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
+import { AuthError } from "@/lib/auth";
+import { mapDocumentFollowUpContext, documentFollowUpHref } from "@/lib/document-follow-up";
 
 async function normalizeWorkItemRelations(values: WorkItemFormValues, context: OrganizationContext, client?: TenantDb): Promise<{ receiptId: string | null; policyId: string | null; clientId: string | null; insurerId: string | null }> {
   if (!client) return withTenantTransaction(context, (tx) => normalizeWorkItemRelations(values, context, tx));
@@ -110,6 +115,24 @@ function buildWorkItemBulkWhere(context: OrganizationContext, ids: string[]): Pr
   };
 }
 
+async function createTaskWorkItem(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  data: Omit<Prisma.WorkItemUncheckedCreateInput, "organizationId">,
+) {
+  const workItem = await tx.workItem.create({ data: { ...data, organizationId } });
+  const routeId = workItem.sourceId ?? workItem.id;
+  await writeActivityLog({
+    organizationId: workItem.organizationId,
+    entityType: "WorkItem",
+    entityId: routeId,
+    action: "TASK_CREATE",
+    newValue: workItem,
+    db: tx,
+  });
+  return workItem;
+}
+
 export async function createWorkItem(values: WorkItemFormValues): Promise<MutationResult> {
   const parsed = workItemSchema.safeParse(values);
 
@@ -124,44 +147,31 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
     const workItem = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const payload = await normalizeWorkItemInput(parsed.data, context, undefined, tx);
-      const createdWorkItem = await tx.workItem.create({
-        data: {
-          organizationId: context.organizationId,
-          id: workItemId,
-          sourceType: "WorkItem",
-          sourceId: workItemId,
-          workItemType: "TASK",
-          taskType: payload.taskType,
-          status: mapTaskStatusToWorkItemStatus(payload.status),
-          priority: payload.priority,
-          folio: payload.folio,
-          title: payload.title,
-          description: payload.description,
-          entityType: "WorkItem",
-          entityId: workItemId,
-          clientId: payload.clientId,
-          policyId: payload.policyId,
-          insurerId: payload.insurerId,
-          receiptId: payload.receiptId,
-          startDate: payload.startDate,
-          dueDate: payload.dueDate,
-          closedDate: payload.closedDate,
-          notes: payload.notes,
-          createdById: userId,
-          updatedById: userId,
-          assignedToId: userId,
-        },
-      });
-      const workItemRouteId = createdWorkItem.sourceId ?? createdWorkItem.id;
-      await writeActivityLog({
-        organizationId: context.organizationId,
+      const createdWorkItem = await createTaskWorkItem(tx, context.organizationId, {
+        id: workItemId,
+        sourceType: "WorkItem",
+        sourceId: workItemId,
+        workItemType: "TASK",
+        taskType: payload.taskType,
+        status: mapTaskStatusToWorkItemStatus(payload.status),
+        priority: payload.priority,
+        folio: payload.folio,
+        title: payload.title,
+        description: payload.description,
         entityType: "WorkItem",
-        entityId: workItemRouteId,
-        action: "TASK_CREATE",
-        newValue: createdWorkItem,
-        db: tx,
+        entityId: workItemId,
+        clientId: payload.clientId,
+        policyId: payload.policyId,
+        insurerId: payload.insurerId,
+        receiptId: payload.receiptId,
+        startDate: payload.startDate,
+        dueDate: payload.dueDate,
+        closedDate: payload.closedDate,
+        notes: payload.notes,
+        createdById: userId,
+        updatedById: userId,
+        assignedToId: userId,
       });
-
       return createdWorkItem;
     });
 
@@ -194,6 +204,177 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
     return successResult(workItemRouteId, "/tasks", "Pendiente creado.");
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo crear el pendiente.");
+  }
+}
+
+export type DocumentFollowUpResult =
+  | { ok: true; taskId: string; href: string; message: string; existing?: boolean }
+  | { ok: false; error: string };
+
+export async function createDocumentFollowUp(documentId: string, formData: FormData): Promise<DocumentFollowUpResult> {
+  const parsed = documentFollowUpSchema.safeParse({
+    title: formData.get("title"),
+    dueDate: formData.get("dueDate"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Revisa los datos del pendiente." };
+
+  try {
+    const context = await requireOrganizationContext();
+    const taskId = randomUUID();
+    const workItemId = randomUUID();
+    const result = await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+
+      if (!areDocumentFilesEnabled()) throw new AuthError("DOCUMENTS_FILES_DISABLED", 403);
+      const [organization, capability] = await Promise.all([
+        tx.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } }),
+        resolveOrganizationCapability(context.organizationId, "DOCUMENTS", tx),
+      ]);
+      if (organization?.kind === "DEMO") throw new AuthError("DEMO_DOCUMENTS_DISABLED", 403);
+      if (!capability.enabled) throw new AuthError("DOCUMENTS_CAPABILITY_DISABLED", 403);
+
+      const lockedDocuments = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Document"
+        WHERE "id" = ${documentId} AND "organizationId" = ${context.organizationId}
+        FOR UPDATE
+      `;
+      if (lockedDocuments.length !== 1) throw new AuthError("DOCUMENT_NOT_AVAILABLE", 404);
+      const document = await tx.document.findFirst({
+        where: {
+          id: documentId,
+          ...documentOperationalWhere(context.membershipRole === "AGENT" ? context.userId : undefined, context.organizationId),
+        },
+        select: {
+          id: true,
+          taskId: true,
+          clientId: true,
+          policyId: true,
+          policy: { select: { clientId: true } },
+          endorsement: { select: { policyId: true, policy: { select: { clientId: true } } } },
+          receipt: { select: { clientId: true, policyId: true } },
+          claim: { select: { clientId: true, policyId: true } },
+        },
+      });
+      if (!document) throw new AuthError("DOCUMENT_NOT_AVAILABLE", 404);
+      if (document.taskId) return { taskId: document.taskId, existing: true as const };
+
+      const relations = mapDocumentFollowUpContext({
+        clientId: document.clientId,
+        policyId: document.policyId,
+        policyClientId: document.policy?.clientId ?? null,
+        endorsementPolicyId: document.endorsement?.policyId ?? null,
+        endorsementClientId: document.endorsement?.policy.clientId ?? null,
+        receiptClientId: document.receipt?.clientId ?? null,
+        receiptPolicyId: document.receipt?.policyId ?? null,
+        claimClientId: document.claim?.clientId ?? null,
+        claimPolicyId: document.claim?.policyId ?? null,
+      });
+
+      let clientId = relations.clientId;
+      const policyId = relations.policyId;
+      if (policyId) {
+        const policy = await tx.policy.findFirst({
+          where: {
+            id: policyId,
+            organizationId: context.organizationId,
+            ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}),
+          },
+          select: { id: true, clientId: true },
+        });
+        if (!policy || (clientId && clientId !== policy.clientId)) throw new AuthError("DOCUMENT_RELATION_NOT_AVAILABLE", 404);
+        clientId = policy.clientId;
+      } else if (clientId) {
+        const client = await tx.client.findFirst({
+          where: {
+            id: clientId,
+            organizationId: context.organizationId,
+            ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}),
+          },
+          select: { id: true },
+        });
+        if (!client) throw new AuthError("DOCUMENT_RELATION_NOT_AVAILABLE", 404);
+      }
+
+      const values: DocumentFollowUpValues = parsed.data;
+      const dueDate = parseDateInput(values.dueDate);
+      const now = new Date();
+      const folio = `PD-${now.getUTCFullYear()}-${taskId.slice(0, 8).toUpperCase()}`;
+      const notes = normalizeOptionalText(values.notes);
+
+      await tx.task.create({ // DOCUMENT_FOLLOW_UP_TASK_COMPAT_WRITE: paired atomically with the canonical WorkItem below.
+        data: {
+          id: taskId,
+          organizationId: context.organizationId,
+          folio,
+          clientId,
+          policyId,
+          title: values.title,
+          description: null,
+          taskType: "GENERAL",
+          status: "OPEN",
+          priority: "MEDIUM",
+          startDate: now,
+          dueDate,
+          notes,
+          createdById: context.userId,
+          updatedById: context.userId,
+        },
+      });
+      await createTaskWorkItem(tx, context.organizationId, {
+        id: workItemId,
+        sourceType: "Task",
+        sourceId: taskId,
+        workItemType: "TASK",
+        taskType: "GENERAL",
+        status: "OPEN",
+        priority: "MEDIUM",
+        folio,
+        title: values.title,
+        entityType: "Task",
+        entityId: taskId,
+        clientId,
+        policyId,
+        startDate: now,
+        dueDate,
+        notes,
+        createdById: context.userId,
+        updatedById: context.userId,
+        assignedToId: context.userId,
+      });
+
+      const claimed = await tx.document.updateMany({
+        where: { id: document.id, organizationId: context.organizationId, taskId: null },
+        data: { taskId, updatedById: context.userId },
+      });
+      if (claimed.count !== 1) throw new AuthError("DOCUMENT_NOT_AVAILABLE", 404);
+
+      return { taskId, existing: false as const };
+    });
+
+    revalidatePaths([
+      "/documents", "/tasks", "/today", "/operations", "/dashboard",
+      result.taskId ? `/tasks/${result.taskId}` : "/tasks",
+    ]);
+    return {
+      ok: true,
+      taskId: result.taskId,
+      href: documentFollowUpHref(result.taskId),
+      message: result.existing ? "Este documento ya tiene un pendiente vinculado." : "Pendiente creado desde el documento.",
+      ...(result.existing ? { existing: true } : {}),
+    };
+  } catch (error) {
+    if (error instanceof Error) {
+      const messages: Record<string, string> = {
+        DOCUMENTS_FILES_DISABLED: "La creación de pendientes desde documentos está deshabilitada.",
+        DEMO_DOCUMENTS_DISABLED: "Esta acción no está disponible para documentos DEMO.",
+        DOCUMENTS_CAPABILITY_DISABLED: "Los documentos no están habilitados para esta organización.",
+        DOCUMENT_NOT_AVAILABLE: "El documento no existe o no pertenece a tu cartera.",
+        DOCUMENT_RELATION_NOT_AVAILABLE: "El cliente o la póliza asociados no están disponibles para tu organización o cartera.",
+      };
+      if (messages[error.message]) return { ok: false, error: messages[error.message] };
+    }
+    return { ok: false, error: error instanceof Error ? error.message : "No se pudo crear el pendiente." };
   }
 }
 

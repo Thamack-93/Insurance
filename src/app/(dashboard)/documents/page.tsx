@@ -13,6 +13,7 @@ import { Pagination } from "@/components/lists/pagination";
 import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
 import { DocumentInbox, type DocumentInboxOptions } from "@/components/documents/document-inbox";
+import { CreateDocumentFollowUpDialog } from "@/components/documents/create-document-follow-up-dialog";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import {
@@ -257,6 +258,7 @@ export default async function DocumentsPage({
                     <TableHead>Cliente / Póliza</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Situación</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -291,6 +293,16 @@ export default async function DocumentsPage({
                           const situation = getDocumentSituation(document);
                           return <Badge variant="outline" className={situation.className}>{situation.label}</Badge>;
                         })()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <CreateDocumentFollowUpDialog
+                          documentId={document.id}
+                          fileName={document.fileName}
+                          clientName={document.client?.fullName ?? null}
+                          policyNumber={document.policy?.policyNumber ?? null}
+                          taskId={document.taskId}
+                          enabled={documentsEnabled}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
