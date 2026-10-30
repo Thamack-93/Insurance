@@ -6,6 +6,7 @@ type MotionSurface = {
   path: string;
   target: string;
   region: string;
+  expandDetails?: string;
 };
 
 const motionSurfaces: MotionSurface[] = [
@@ -14,6 +15,7 @@ const motionSurfaces: MotionSurface[] = [
     path: "/today",
     target: '[data-motion-target="lift"]',
     region: '[aria-label="Resumen operativo"]',
+    expandDetails: "Comisiones e indicadores",
   },
   {
     name: "insights-kpis",
@@ -59,6 +61,9 @@ test.describe("global animation integrity", () => {
       for (const viewport of viewports) {
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
         await page.goto(surface.path);
+        if (surface.expandDetails) {
+          await page.getByText(surface.expandDetails, { exact: true }).click();
+        }
 
         const targets = page.locator(surface.target);
         const targetCount = await targets.count();
@@ -96,14 +101,15 @@ test.describe("global animation integrity", () => {
     }
   });
 
-  test("keeps the shared button press state inside its quick-action region", async ({ page }, testInfo) => {
+  test("keeps the shared button press state inside its action section", async ({ page }, testInfo) => {
     await authenticatePageAsAdmin(page);
     for (const viewport of viewports) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.goto("/today");
 
-      const quickActions = page.getByRole("region", { name: "Acciones rápidas" });
-      const button = quickActions.getByRole("button", { name: "Registrar pago" });
+      const actionSection = page.locator("details").filter({ hasText: "Más acciones" });
+      await actionSection.locator("summary").click();
+      const button = actionSection.getByRole("button", { name: "Registrar pago con Nora" });
       await expect(button).toHaveCount(1);
       await button.scrollIntoViewIfNeeded();
 
@@ -113,7 +119,7 @@ test.describe("global animation integrity", () => {
 
       await page.mouse.move(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2);
       await page.mouse.down();
-      await expectInsideVisibleRegion(button, quickActions);
+      await expectInsideVisibleRegion(button, actionSection);
       await page.screenshot({ path: testInfo.outputPath(`today-button-${viewport.name}-active.png`), fullPage: true });
       await page.mouse.up();
       await page.keyboard.press("Escape");
@@ -123,9 +129,8 @@ test.describe("global animation integrity", () => {
   test("disables transform motion when reduced motion is requested", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await authenticatePageAsAdmin(page);
-    await page.goto("/today");
-
-    const target = page.locator('[data-motion-target="lift"]');
+    await page.goto("/today?view=insights");
+    const target = page.locator('[data-motion-target="icon-shift"]');
     const targetCount = await target.count();
     expect(targetCount).toBeGreaterThan(0);
     const firstTarget = target.nth(0);
