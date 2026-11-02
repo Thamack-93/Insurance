@@ -31,6 +31,7 @@ type ReceiptFormProps = {
   description: string;
   submitLabel: string;
   cancelHref: string;
+  submitSuccessHref?: string;
   defaultValues: ReceiptFormValues;
   policyOptions: SelectOption[];
   policyAssets: Record<string, Array<{ id: string; description: string; unitClass: string | null }>>;
@@ -44,6 +45,7 @@ export function ReceiptForm({
   description,
   submitLabel,
   cancelHref,
+  submitSuccessHref,
   defaultValues,
   policyOptions,
   policyAssets,
@@ -126,7 +128,7 @@ export function ReceiptForm({
       }
 
       toast.success(result.message);
-      router.push(result.redirectTo);
+      router.push(submitSuccessHref ?? result.redirectTo);
       router.refresh();
     });
   }

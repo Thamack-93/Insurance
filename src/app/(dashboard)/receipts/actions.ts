@@ -170,13 +170,13 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
       const hasCalculatedCommission = previous.commissions.length > 0;
       const updated = await tx.receipt.update({ where: { id }, data: {
         ...payload,
-        ...(hasCalculatedCommission ? baseChanged ? {
+        ...(hasCalculatedCommission && baseChanged ? {
           commissionCalculationStatus: "REVIEW",
           commissionReviewReason: "Cambió la base de prima después de calcular la comisión. Revisa el cálculo guardado antes de usarlo.",
         } : {
           commissionCalculationStatus: previous.commissionCalculationStatus,
           commissionReviewReason: previous.commissionReviewReason,
-        } : {}),
+        }),
         updatedById: context.userId,
       } });
       await writeActivityLog({ organizationId: context.organizationId, entityType: "Receipt", entityId: updated.id, action: "RECEIPT_UPDATE", oldValue: previous, newValue: updated, userId: context.userId, db: tx });
@@ -192,6 +192,7 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
       "/today",
       "/portfolio",
       "/risks",
+      "/data-quality",
     ]);
 
     return successResult(receipt.id, "/receipts", "Recibo actualizado.");

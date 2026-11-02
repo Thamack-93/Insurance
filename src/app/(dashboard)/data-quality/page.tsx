@@ -47,6 +47,12 @@ import { ReviewActionButtons } from "@/components/data-quality/review-action-but
 import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
+import { appendReturnTo } from "@/lib/return-to";
+import {
+  classifyCommissionReviewCandidate,
+  groupCommissionReviewsByPolicy,
+  isMissingCommissionPremiumInformation,
+} from "@/lib/commission-review";
 import {
   approveLedgerIssue,
   approveReceiptReviewIssue,
@@ -113,6 +119,16 @@ type ReviewInboxItem = {
   updatedAt: Date;
   href: string;
   actionLabel: string;
+  commissionReceipts?: Array<{
+    receiptId: string;
+    policyId: string;
+    receiptNumber: string;
+    amount: number;
+    currency: string;
+    reason: string | null;
+    receiptStatus: string;
+    postedPaymentCount: number;
+  }>;
 };
 
 function displayReviewReason(reason: string | null | undefined) {
@@ -362,6 +378,24 @@ export default async function DataQualityPage({
   const closedRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status !== "PENDING");
   const openLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status === "OPEN" || issue.status === "PENDING");
   const closedLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status !== "OPEN" && issue.status !== "PENDING");
+  const commissionReviews = commissionReviewCandidates
+    .map((candidate) => ({ candidate, classification: classifyCommissionReviewCandidate(candidate) }))
+    .filter((entry) => entry.classification !== null);
+  const matchesCommissionSearch = (candidate: (typeof commissionReviewCandidates)[number]) =>
+    matchesTableQuery(query, candidate.policyNumber, candidate.receiptNumber, candidate.clientName, candidate.insurerName, candidate.reason);
+  const actionableCommissionReviews = commissionReviews
+    .filter((entry) => entry.classification === "ACTIONABLE"
+      && !entry.candidate.reason?.toLowerCase().startsWith("la prima no concilia con los recibos vigentes")
+      && matchesCommissionSearch(entry.candidate))
+    .map((entry) => entry.candidate);
+  const pendingCommissionReviews = commissionReviews
+    .filter((entry) => entry.classification === "PENDING_UNPAID" && matchesCommissionSearch(entry.candidate))
+    .map((entry) => entry.candidate);
+  const cancelledCommissionReviews = commissionReviews
+    .filter((entry) => entry.classification === "CANCELLED_UNPAID" && matchesCommissionSearch(entry.candidate))
+    .map((entry) => entry.candidate);
+  const actionableCommissionGroups = groupCommissionReviewsByPolicy(actionableCommissionReviews);
+  const commissionReturnTo = buildTableHref("/data-quality", params, { tab: "revisiones" }, { resetPage: false });
   const reviewInboxItems: ReviewInboxItem[] = [
     ...premiumReconciliationReviews.map((review) => ({
       id: review.id,
@@ -373,8 +407,10 @@ export default async function DataQualityPage({
       amount: review.difference,
       currency: review.currency,
       updatedAt: review.updatedAt,
-      href: `/policies/${review.policyId}`,
-      actionLabel: "Abrir póliza",
+      href: appendReturnTo(review.kind === "ENDORSEMENT"
+        ? `/policies/${review.policyId}/endorsements/${review.sourceRecordId}/edit`
+        : `/policies/${review.policyId}/edit`, commissionReturnTo),
+      actionLabel: review.kind === "ENDORSEMENT" ? "Editar endoso" : "Editar póliza",
     })),
     ...receiptReviewIssues
       .filter((issue) => (issue.status === "OPEN" || issue.status === "PENDING") && !issue.suppressedByRuleId && !issue.duplicateOfId)
@@ -391,20 +427,28 @@ export default async function DataQualityPage({
         href: `/data-quality?tab=pagos&q=${encodeURIComponent(issue.receiptNumber)}`,
         actionLabel: "Revisar pago",
       })),
-    ...commissionReviewCandidates
-      .filter((candidate) => !candidate.reason?.toLowerCase().startsWith("la prima no concilia con los recibos vigentes"))
-      .map((candidate) => ({
-        id: `commission:${candidate.receiptId}`,
+    ...actionableCommissionGroups.map((group) => ({
+        id: `commission-policy:${group.policyId}`,
         category: "Comisiones" as const,
-        subject: `${candidate.policyNumber} · Recibo ${candidate.receiptNumber}`,
-        clientName: candidate.clientName,
-        insurerName: candidate.insurerName,
-        reason: candidate.reason || "La comisión de este recibo está pendiente de cálculo.",
-        amount: candidate.amount,
-        currency: candidate.currency,
-        updatedAt: candidate.updatedAt,
-        href: `/commissions?q=${encodeURIComponent(candidate.policyNumber)}`,
+        subject: group.policyNumber,
+        clientName: group.clientName,
+        insurerName: group.insurerName,
+        reason: `${group.receipts.length} ${group.receipts.length === 1 ? "recibo con pago POSTED requiere" : "recibos con pago POSTED requieren"} revisión de comisión. ${group.receipts.map((candidate) => candidate.reason || "Pendiente de cálculo.").join(" ")}`,
+        amount: null,
+        currency: null,
+        updatedAt: group.receipts.reduce((latest, candidate) => candidate.updatedAt > latest ? candidate.updatedAt : latest, group.receipts[0]!.updatedAt),
+        href: `/commissions?q=${encodeURIComponent(group.policyNumber)}`,
         actionLabel: "Abrir comisiones",
+        commissionReceipts: group.receipts.map((candidate) => ({
+          receiptId: candidate.receiptId,
+          policyId: candidate.policyId,
+          receiptNumber: candidate.receiptNumber,
+          amount: candidate.amount,
+          currency: candidate.currency,
+          reason: candidate.reason,
+          receiptStatus: candidate.receiptStatus,
+          postedPaymentCount: candidate.postedPaymentCount,
+        })),
       })),
     ...openRenewalSuggestions
       .filter((suggestion) => !suggestion.suppressedByRuleId && !suggestion.duplicateOfId)
@@ -439,7 +483,9 @@ export default async function DataQualityPage({
   ];
   const filteredReviewInboxItems = reviewInboxItems
     .filter((item) => matchesTableQuery(query, item.category, item.subject, item.clientName, item.insurerName, item.reason))
-    .sort((left, right) => left.updatedAt.getTime() - right.updatedAt.getTime() || left.category.localeCompare(right.category));
+    .sort((left, right) => Number(right.category === "Comisiones") - Number(left.category === "Comisiones")
+      || left.updatedAt.getTime() - right.updatedAt.getTime()
+      || left.category.localeCompare(right.category));
   const pagedReviewInboxItems = filteredReviewInboxItems.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
   const filteredOpenRenewalSuggestions = openRenewalSuggestions.filter((suggestion) =>
     matchesTableQuery(
@@ -586,6 +632,49 @@ export default async function DataQualityPage({
 
           <TabsContent value="revisiones" className="space-y-6">
             <SectionCard
+              title={`Revisión de comisiones (${actionableCommissionReviews.length})`}
+              description="Primero aparecen recibos con pago POSTED. Los registros sin evidencia de pago se clasifican aparte y no se presentan como comisión por cobrar."
+            >
+              <div className="space-y-5 p-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <MetricCard title="Con pago POSTED" value={actionableCommissionReviews.length} description={`${actionableCommissionGroups.length} pólizas con acción disponible.`} tone="amber" />
+                  <MetricCard title="Pendientes sin pago" value={pendingCommissionReviews.length} description="Aún no representan una comisión pagada." tone="slate" />
+                  <MetricCard title="Cancelados sin pago" value={cancelledCommissionReviews.length} description="Se conservan separados de los recibos accionables." tone="slate" />
+                </div>
+
+                {pendingCommissionReviews.length > 0 ? (
+                  <details className="rounded-lg border bg-muted/15">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Pendientes sin pago ({pendingCommissionReviews.length})</summary>
+                    <ul className="max-h-80 divide-y overflow-y-auto border-t px-4">
+                      {pendingCommissionReviews.map((candidate) => (
+                        <li key={candidate.receiptId} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+                          <span className="min-w-0"><strong>{candidate.policyNumber}</strong> · Recibo {candidate.receiptNumber}<span className="ml-2 text-muted-foreground">{formatCurrencyExact(candidate.amount, candidate.currency)} {candidate.currency}</span></span>
+                          <Link className="font-medium text-primary hover:underline" href={appendReturnTo(`/receipts/${candidate.receiptId}`, commissionReturnTo)}>Abrir recibo</Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+                {cancelledCommissionReviews.length > 0 ? (
+                  <details className="rounded-lg border bg-muted/15">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Cancelados sin pago POSTED ({cancelledCommissionReviews.length})</summary>
+                    <ul className="max-h-80 divide-y overflow-y-auto border-t px-4">
+                      {cancelledCommissionReviews.map((candidate) => (
+                        <li key={candidate.receiptId} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+                          <span className="min-w-0"><strong>{candidate.policyNumber}</strong> · Recibo {candidate.receiptNumber}<span className="ml-2 text-muted-foreground">{formatCurrencyExact(candidate.amount, candidate.currency)} {candidate.currency}</span></span>
+                          <Link className="font-medium text-primary hover:underline" href={appendReturnTo(`/receipts/${candidate.receiptId}`, commissionReturnTo)}>Abrir recibo</Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+                {actionableCommissionReviews.length === 0 ? (
+                  <p className="rounded-lg border border-dashed px-4 py-5 text-sm text-muted-foreground">No hay recibos con pago POSTED que requieran revisión de comisión{query ? " para esta búsqueda" : ""}.</p>
+                ) : null}
+              </div>
+            </SectionCard>
+
+            <SectionCard
               title={`Pendientes por revisar (${filteredReviewInboxItems.length})`}
               description="Casos abiertos de primas, pagos, comisiones, renovaciones y ledger. Abrir un caso te lleva al registro y a su flujo de revisión."
             >
@@ -610,7 +699,7 @@ export default async function DataQualityPage({
                             <TableHead>Póliza / registro</TableHead>
                             <TableHead>Cliente y aseguradora</TableHead>
                             <TableHead>Qué revisar</TableHead>
-                            <TableHead className="text-right">Diferencia / importe</TableHead>
+                            <TableHead className="text-right">Importe / recibos</TableHead>
                             <TableHead>Desde</TableHead>
                             <TableHead className="text-right">Acción</TableHead>
                           </TableRow>
@@ -624,9 +713,34 @@ export default async function DataQualityPage({
                                 <p>{item.clientName}</p>
                                 <p className="text-xs text-muted-foreground">{item.insurerName}</p>
                               </TableCell>
-                              <TableCell className="max-w-md whitespace-normal text-sm">{item.reason}</TableCell>
+                              <TableCell className="max-w-md whitespace-normal text-sm">
+                                {item.commissionReceipts ? (
+                                  <ul className="space-y-3">
+                                    {item.commissionReceipts.map((candidate) => {
+                                      const missingPremium = isMissingCommissionPremiumInformation(candidate.reason);
+                                      const editPolicy = Boolean(candidate.reason && /clase de riesgo asegurada|clasifica la unidad/i.test(candidate.reason));
+                                      const sourceHref = editPolicy
+                                        ? `/policies/${candidate.policyId}/edit`
+                                        : `/receipts/${candidate.receiptId}${missingPremium ? "/edit" : ""}`;
+                                      const actionLabel = editPolicy ? "Editar póliza" : missingPremium ? "Completar desglose" : "Abrir recibo";
+                                      return (
+                                        <li key={candidate.receiptId} className="flex flex-wrap items-start justify-between gap-2 border-b pb-3 last:border-b-0 last:pb-0">
+                                          <span className="min-w-0">
+                                            <span className="block font-medium">Recibo {candidate.receiptNumber} · {statusLabel(candidate.receiptStatus)}</span>
+                                            <span className="block text-muted-foreground">{candidate.reason || "La comisión está pendiente de cálculo."}</span>
+                                            <span className="mt-1 block text-xs text-muted-foreground">{formatCurrencyExact(candidate.amount, candidate.currency)} {candidate.currency} · {candidate.postedPaymentCount} pago(s) POSTED</span>
+                                          </span>
+                                          <Button asChild size="sm" variant="outline">
+                                            <Link href={appendReturnTo(sourceHref, commissionReturnTo)}>{actionLabel}<ArrowRight className="ml-2 size-4" /></Link>
+                                          </Button>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : item.reason}
+                              </TableCell>
                               <TableCell className="whitespace-nowrap text-right">
-                                {item.amount === null || !item.currency ? "—" : formatCurrencyExact(item.amount, item.currency)}
+                                {item.commissionReceipts ? `${item.commissionReceipts.length} con pago POSTED` : item.amount === null || !item.currency ? "—" : formatCurrencyExact(item.amount, item.currency)}
                               </TableCell>
                               <TableCell className="whitespace-nowrap">{formatDate(item.updatedAt)}</TableCell>
                               <TableCell className="text-right">

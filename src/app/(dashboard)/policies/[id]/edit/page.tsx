@@ -11,11 +11,14 @@ import type { PolicyFormValues } from "@/lib/validations";
 import { riskDetailsFromExisting } from "@/lib/policy-risk-details";
 import { clientOperationalWhere, policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { normalizePolicyType } from "@/lib/domain-values";
+import { normalizeReturnTo } from "@/lib/return-to";
 
-export default async function EditPolicyPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditPolicyPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const routeParams = await params;
   const id = decodeRouteIdentifier(routeParams.id);
   if (!id) notFound();
+  const query = (await searchParams) ?? {};
+  const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, `/policies/${id}`);
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
   const [policy, clients, insurers] = await withTenantTransaction(scope.context, (db) => Promise.all([
@@ -80,7 +83,8 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
           title="Edición de póliza"
           description="Los cambios impactan cartera, renovaciones y pantallas financieras relacionadas."
           submitLabel="Guardar cambios"
-          cancelHref={`/policies/${policy.id}`}
+          cancelHref={returnTo}
+          submitSuccessHref={returnTo}
           originalTerm={{ startDate: formatDateInput(policy.startDate), endDate: formatDateInput(policy.endDate) }}
           defaultValues={createPolicyDefaults({
             policyNumber: policy.policyNumber,
