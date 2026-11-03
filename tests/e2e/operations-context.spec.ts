@@ -5,7 +5,12 @@ import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
-async function dragRenewalCardToStage(page: Page, handle: Locator, stage: Locator) {
+async function dragRenewalCardToStage(
+  page: Page,
+  handle: Locator,
+  stage: Locator,
+  targetArea: "header" | "card" | "empty" = "header",
+) {
   const viewport = page.locator("[data-renewal-board-viewport]");
   await handle.scrollIntoViewIfNeeded();
   const handleBounds = await handle.boundingBox();
@@ -31,8 +36,18 @@ async function dragRenewalCardToStage(page: Page, handle: Locator, stage: Locato
   const stageBounds = await stage.boundingBox();
   if (!stageBounds) throw new Error("Renewal stage is not measurable after scrolling.");
   const dropX = Math.min(viewportRight - 8, Math.max(viewportBounds.x + 8, stageBounds.x + stageBounds.width / 2));
-  const dropY = Math.min(viewportBounds.y + viewportBounds.height - 8, Math.max(viewportBounds.y + 8, stageBounds.y + Math.min(64, stageBounds.height / 2)));
+  let targetY = stageBounds.y + 24;
+  if (targetArea === "card") {
+    const targetCard = stage.locator("[data-renewal-card]").first();
+    const cardBounds = await targetCard.boundingBox();
+    if (!cardBounds) throw new Error("Renewal target card is not measurable.");
+    targetY = cardBounds.y + cardBounds.height / 2;
+  } else if (targetArea === "empty") {
+    targetY = stageBounds.y + stageBounds.height - 12;
+  }
+  const dropY = Math.min(viewportBounds.y + viewportBounds.height - 8, Math.max(viewportBounds.y + 8, targetY));
   await page.mouse.move(dropX, dropY, { steps: 8 });
+  await expect(page.locator("[data-renewal-drag-preview='true']")).toBeVisible();
   await page.mouse.up();
 }
 
@@ -418,12 +433,14 @@ test.describe("operation queue context", () => {
 
   test("unifies renewal views and confirms drag-and-drop into Lost", async ({ page }) => {
     const fixture = await seedPolicyFixture("RENEWAL-BOARD-DRAG");
+    const cardTargetFixture = await seedPolicyFixture("RENEWAL-BOARD-DRAG-CARD-TARGET");
 
     try {
-      await getTestDb().policy.update({
-        where: { id: fixture.policyId },
+      await getTestDb().policy.updateMany({
+        where: { id: { in: [fixture.policyId, cardTargetFixture.policyId] } },
         data: { endDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000) },
       });
+      await getTestDb().policy.update({ where: { id: cardTargetFixture.policyId }, data: { renewalStage: "CONTACTED" } });
       await authenticatePageAsAdmin(page);
       await page.goto("/operations?view=renewals");
 
@@ -439,23 +456,23 @@ test.describe("operation queue context", () => {
       await expect(page.getByText("Para marcarla como renovada, captura primero la póliza nueva desde la tarjeta.", { exact: true })).toBeVisible();
       await expect(pendingCard).toBeVisible();
 
-      await dragRenewalCardToStage(page, pendingCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-CONTACTED"));
+      await dragRenewalCardToStage(page, pendingCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-CONTACTED"), "card");
       await expectMutationSuccessToast(page, "Renovación movida a Contactado.");
 
       const contactedCard = page.locator("#renewal-stage-CONTACTED li").filter({ hasText: fixture.policyNumber });
       await expect(contactedCard).toBeVisible();
-      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"));
+      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"), "empty");
       const confirmation = page.getByRole("alertdialog");
       await expect(confirmation).toContainText("Se marcará como no continuada");
       await confirmation.getByRole("button", { name: "Cancelar" }).click();
       await expect(contactedCard).toBeVisible();
 
-      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"));
+      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"), "header");
       await page.getByRole("alertdialog").getByRole("button", { name: "Cerrar renovación" }).click();
       await expectMutationSuccessToast(page, "no renovada");
       await expect(page.locator("#renewal-stage-LOST li").filter({ hasText: fixture.policyNumber })).toBeVisible();
     } finally {
-      await cleanupPolicyFixture(fixture);
+      await Promise.all([cleanupPolicyFixture(fixture), cleanupPolicyFixture(cardTargetFixture)]);
     }
   });
 
