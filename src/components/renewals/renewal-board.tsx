@@ -228,17 +228,23 @@ function BoardColumn({ column, isDemo }: { column: RenewalBoardColumn; isDemo: b
         </Badge>
       </header>
 
-      {column.cards.length ? (
-        <ul className="flex flex-col gap-2 p-2">
-          {column.cards.map((card) => (
-            <DraggableRenewalCard key={card.policyId} policyId={card.policyId} policyNumber={card.policyNumber} stage={card.stage}>
-              <RenewalCard card={card} isDemo={isDemo} isDraggable={card.stage !== "WON" && card.stage !== "LOST"} />
-            </DraggableRenewalCard>
-          ))}
-        </ul>
-      ) : (
+      <ul data-renewal-stage-cards={column.stage} className="flex flex-col gap-2 p-2">
+        {column.cards.map((card, sortIndex) => (
+          <DraggableRenewalCard
+            key={card.policyId}
+            policyId={card.policyId}
+            policyNumber={card.policyNumber}
+            stage={card.stage}
+            sortOrder={card.endDate.getTime()}
+            sortIndex={sortIndex}
+          >
+            <RenewalCard card={card} isDemo={isDemo} isDraggable={card.stage !== "WON" && card.stage !== "LOST"} />
+          </DraggableRenewalCard>
+        ))}
+      </ul>
+      {column.cards.length === 0 ? (
         <p className="px-3 py-8 text-center text-sm text-muted-foreground">Sin renovaciones en esta etapa.</p>
-      )}
+      ) : null}
     </RenewalDropColumn>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState, useTransition, type PointerEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useTransition, type PointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronRight, GripVertical } from "lucide-react";
@@ -11,9 +12,22 @@ import { renewalStageLabel } from "@/lib/status";
 import type { RenewalStage } from "@/lib/renewal-board.logic";
 import { cn } from "@/lib/utils";
 
-type DraggedRenewal = { policyId: string; policyNumber: string; stage: RenewalStage };
+type DraggedRenewal = { policyId: string; policyNumber: string; stage: RenewalStage; sortOrder: number };
+type OptimisticRenewalMove = {
+  policyId: string;
+  stage: RenewalStage;
+  sortOrder: number;
+  cardHeight: number;
+  targetList: HTMLUListElement | null;
+  sortIndex: number;
+};
+type RenewalConfirmation = DraggedRenewal & {
+  cardHeight: number;
+  targetList: HTMLUListElement | null;
+  sortIndex: number;
+};
 type RenewalDragSession = DraggedRenewal & {
-  phase: "dragging" | "awaiting-refresh" | "settling";
+  phase: "dragging" | "dropping";
   dropStage: RenewalStage | null;
   pointerId: number;
   startX: number;
@@ -30,9 +44,10 @@ type RenewalDragSession = DraggedRenewal & {
 
 type RenewalDragContextValue = {
   session: RenewalDragSession | null;
+  optimisticMove: OptimisticRenewalMove | null;
   beginDrag: (event: PointerEvent<HTMLSpanElement>, renewal: DraggedRenewal) => void;
   refreshDropTarget: (x: number, y: number) => void;
-  settleDrop: (policyId: string, stage: RenewalStage, bounds: Pick<DOMRect, "left" | "top"> | null) => void;
+  clearOptimisticMove: (policyId: string) => void;
 };
 
 const RenewalDragContext = createContext<RenewalDragContextValue | null>(null);
@@ -49,15 +64,39 @@ function stageAtPoint(x: number, y: number): RenewalStage | null {
   return (target?.dataset.renewalDropStage as RenewalStage | undefined) ?? null;
 }
 
+function dropSlotAtStage(stage: RenewalStage, sortOrder: number, policyId: string) {
+  const column = document.querySelector<HTMLElement>(`[data-renewal-drop-stage="${stage}"]`);
+  if (!column) return null;
+
+  const cards = Array.from(column.querySelectorAll<HTMLElement>("ul > li[data-renewal-card]"));
+  const insertIndex = cards.findIndex((card) => {
+    const candidateSortOrder = Number(card.dataset.renewalCardSortOrder);
+    return candidateSortOrder > sortOrder
+      || (candidateSortOrder === sortOrder && (card.dataset.renewalPolicyId ?? "") > policyId);
+  });
+  const sortIndex = insertIndex < 0 ? cards.length : insertIndex;
+  const list = column.querySelector<HTMLUListElement>("ul");
+  const listBounds = list?.getBoundingClientRect();
+  const left = listBounds ? listBounds.left + 8 : column.getBoundingClientRect().left + 8;
+  const top = sortIndex < cards.length
+    ? cards[sortIndex].getBoundingClientRect().top
+    : cards.length
+      ? cards[cards.length - 1].getBoundingClientRect().bottom + 8
+      : (column.querySelector<HTMLElement>("header")?.getBoundingClientRect().bottom ?? column.getBoundingClientRect().top) + 8;
+
+  return { left, top, sortIndex, list };
+}
+
 export function RenewalBoardInteractions({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [session, setSession] = useState<RenewalDragSession | null>(null);
-  const [confirmation, setConfirmation] = useState<DraggedRenewal | null>(null);
+  const [optimisticMove, setOptimisticMove] = useState<OptimisticRenewalMove | null>(null);
+  const [confirmation, setConfirmation] = useState<RenewalConfirmation | null>(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function beginDrag(event: PointerEvent<HTMLSpanElement>, renewal: DraggedRenewal) {
-    if (event.button !== 0 || pending || confirmationPending || session) return;
+    if (event.button !== 0 || pending || confirmationPending || session || optimisticMove) return;
     const card = event.currentTarget.closest<HTMLElement>("[data-renewal-card]");
     const bounds = card?.getBoundingClientRect();
     if (!card || !bounds) return;
@@ -104,31 +143,20 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
       : current);
   }
 
-  function settleDrop(policyId: string, stage: RenewalStage, bounds: Pick<DOMRect, "left" | "top"> | null) {
-    setSession((current) => {
-      if (!current || current.policyId !== policyId || current.dropStage !== stage || current.phase !== "awaiting-refresh") {
-        return current;
-      }
-      if (!bounds) return null;
-      return {
-        ...current,
-        phase: "settling",
-        pointerX: bounds.left + current.grabOffsetX,
-        pointerY: bounds.top + current.grabOffsetY,
-      };
-    });
-  }
+  const clearOptimisticMove = useCallback((policyId: string) => {
+    setOptimisticMove((current) => current?.policyId === policyId ? null : current);
+  }, []);
 
   useEffect(() => {
-    if (session?.phase !== "settling") return;
+    if (session?.phase !== "dropping") return;
     const policyId = session.policyId;
     const timeout = window.setTimeout(() => {
-      setSession((current) => current?.policyId === policyId && current.phase === "settling" ? null : current);
+      setSession((current) => current?.policyId === policyId && current.phase === "dropping" ? null : current);
     }, 220);
     return () => window.clearTimeout(timeout);
   }, [session?.phase, session?.policyId]);
 
-  function dropRenewal(renewal: DraggedRenewal, stage: RenewalStage) {
+  function dropRenewal(renewal: DraggedRenewal, stage: RenewalStage, dropSlot: ReturnType<typeof dropSlotAtStage>) {
     if (stage === renewal.stage) {
       setSession(null);
       return;
@@ -139,14 +167,29 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
       return;
     }
     if (stage === "LOST") {
-      setConfirmation(renewal);
+      setSession(null);
+      setConfirmation({
+        ...renewal,
+        cardHeight: session?.policyId === renewal.policyId ? session.cardHeight : 0,
+        targetList: dropSlot?.list ?? null,
+        sortIndex: dropSlot?.sortIndex ?? 0,
+      });
       return;
     }
 
+    setOptimisticMove({
+      policyId: renewal.policyId,
+      stage,
+      sortOrder: renewal.sortOrder,
+      cardHeight: session?.policyId === renewal.policyId ? session.cardHeight : 0,
+      targetList: dropSlot?.list ?? null,
+      sortIndex: dropSlot?.sortIndex ?? 0,
+    });
     startTransition(async () => {
       const result = await setRenewalStage(renewal.policyId, stage);
       if (!result.ok) {
         setSession(null);
+        setOptimisticMove(null);
         toast.error(result.error);
         return;
       }
@@ -166,29 +209,39 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
       return;
     }
 
+    const dropSlot = dropSlotAtStage(targetStage, active.sortOrder, active.policyId);
     setSession((current) => current?.pointerId === event.pointerId
       ? {
           ...current,
-          phase: "awaiting-refresh",
+          phase: "dropping",
           dropStage: targetStage,
           overStage: targetStage,
-          pointerX: event.clientX,
-          pointerY: event.clientY,
+          pointerX: (dropSlot?.left ?? event.clientX - current.grabOffsetX) + current.grabOffsetX,
+          pointerY: (dropSlot?.top ?? event.clientY - current.grabOffsetY) + current.grabOffsetY,
         }
       : current);
-    dropRenewal(active, targetStage);
+    dropRenewal(active, targetStage, dropSlot);
   }
 
   function cancelDrag(event: PointerEvent<HTMLDivElement>) {
-    setSession((current) => current?.pointerId === event.pointerId ? null : current);
+    setSession((current) => current?.phase === "dragging" && current.pointerId === event.pointerId ? null : current);
   }
 
   async function confirmLost() {
     if (!confirmation) return;
     setConfirmationPending(true);
+    setOptimisticMove({
+      policyId: confirmation.policyId,
+      stage: "LOST",
+      sortOrder: confirmation.sortOrder,
+      cardHeight: confirmation.cardHeight,
+      targetList: confirmation.targetList,
+      sortIndex: confirmation.sortIndex,
+    });
     try {
       const result = await setRenewalStage(confirmation.policyId, "LOST");
       if (!result.ok) {
+        setOptimisticMove(null);
         setSession(null);
         toast.error(result.error);
         return;
@@ -202,7 +255,7 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
   }
 
   return (
-    <RenewalDragContext.Provider value={{ session, beginDrag, refreshDropTarget, settleDrop }}>
+    <RenewalDragContext.Provider value={{ session, optimisticMove, beginDrag, refreshDropTarget, clearOptimisticMove }}>
       <div onPointerMove={updateDragTarget} onPointerUp={finishDrag} onPointerCancel={cancelDrag}>
         {children}
       </div>
@@ -384,21 +437,20 @@ export function DraggableRenewalCard({
   policyId,
   policyNumber,
   stage,
+  sortOrder,
   children,
-}: DraggedRenewal & { children: ReactNode }) {
+  sortIndex,
+}: DraggedRenewal & { children: ReactNode; sortIndex: number }) {
   const canDrag = stage !== "WON" && stage !== "LOST";
-  const { session, beginDrag, settleDrop } = useRenewalDragContext();
-  const cardRef = useRef<HTMLLIElement>(null);
-  const isDragging = session?.policyId === policyId && session.isDragging;
-  const waitingForRefresh = session?.policyId === policyId
-    && session.phase === "awaiting-refresh"
-    && session.dropStage === stage;
+  const { session, optimisticMove, beginDrag, clearOptimisticMove } = useRenewalDragContext();
+  const isDragging = session?.policyId === policyId && session.stage === stage && session.isDragging;
+  const movedOptimistically = optimisticMove?.policyId === policyId && optimisticMove.stage !== stage;
 
   useEffect(() => {
-    if (!waitingForRefresh) return;
-    const bounds = cardRef.current?.getBoundingClientRect();
-    settleDrop(policyId, stage, bounds ? { left: bounds.left, top: bounds.top } : null);
-  }, [policyId, settleDrop, stage, waitingForRefresh]);
+    if (optimisticMove?.policyId !== policyId || optimisticMove.stage !== stage) return;
+    const timeout = window.setTimeout(() => clearOptimisticMove(policyId), 0);
+    return () => window.clearTimeout(timeout);
+  }, [clearOptimisticMove, optimisticMove?.policyId, optimisticMove?.stage, policyId, stage]);
 
   const previewStyle = isDragging && session ? {
     position: "fixed" as const,
@@ -406,39 +458,71 @@ export function DraggableRenewalCard({
     left: 0,
     width: session.cardWidth,
     minHeight: session.cardHeight,
-    transform: `translate3d(${session.pointerX - session.grabOffsetX}px, ${session.pointerY - session.grabOffsetY}px, 0) scale(1.015)`,
+    transform: `translate3d(${session.pointerX - session.grabOffsetX}px, ${session.pointerY - session.grabOffsetY}px, 0) scale(${session.phase === "dragging" ? 1.015 : 1})`,
   } : undefined;
+
+  const cardContent = (
+    <div
+      data-renewal-card-content
+      data-renewal-drag-preview={isDragging ? "true" : undefined}
+      className={cn(
+        "relative rounded-xl",
+        isDragging && "z-[100] cursor-grabbing bg-card pointer-events-none",
+        isDragging && session?.phase === "dragging" && "shadow-2xl ring-2 ring-primary/30",
+        isDragging && session?.phase === "dropping" && "shadow-lg ring-1 ring-border transition-transform duration-200 ease-out",
+      )}
+      style={previewStyle}
+    >
+      {canDrag ? (
+        <span
+          data-renewal-drag-handle
+          onPointerDown={(event) => beginDrag(event, { policyId, policyNumber, stage, sortOrder })}
+          title="Arrastra para mover"
+          aria-hidden="true"
+          className="absolute left-2 top-2 z-10 inline-flex size-7 touch-none select-none items-center justify-center rounded-md text-muted-foreground/70 cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing"
+        >
+          <GripVertical className="size-4" />
+        </span>
+      ) : null}
+      {children}
+    </div>
+  );
+
+  if (movedOptimistically && optimisticMove?.targetList) {
+    return (
+      <>
+        <li
+          data-renewal-card-placeholder
+          aria-hidden="true"
+          className="rounded-xl border-2 border-dashed border-primary/35 bg-primary/5"
+          style={{ minHeight: optimisticMove.cardHeight || undefined, order: sortIndex * 2 }}
+        />
+        {createPortal(
+          <li
+            data-renewal-card
+            data-renewal-policy-id={policyId}
+            data-renewal-card-sort-order={sortOrder}
+            className="relative rounded-xl"
+            style={{ order: optimisticMove.sortIndex * 2 - 1 }}
+          >
+            {cardContent}
+          </li>,
+          optimisticMove.targetList,
+          policyId,
+        )}
+      </>
+    );
+  }
 
   return (
     <li
-      ref={cardRef}
       data-renewal-card
+      data-renewal-policy-id={policyId}
+      data-renewal-card-sort-order={sortOrder}
       className={cn("relative rounded-xl", isDragging && "border-2 border-dashed border-primary/35 bg-primary/5")}
-      style={isDragging && session ? { minHeight: session.cardHeight } : undefined}
+      style={{ minHeight: isDragging && session ? session.cardHeight : undefined, order: sortIndex * 2 }}
     >
-      <div
-        data-renewal-card-content
-        data-renewal-drag-preview={isDragging ? "true" : undefined}
-        className={cn(
-          "relative rounded-xl",
-          isDragging && "z-[100] cursor-grabbing bg-card shadow-2xl ring-2 ring-primary/30 pointer-events-none",
-          session?.policyId === policyId && session.phase === "settling" && "transition-transform duration-200 ease-out",
-        )}
-        style={previewStyle}
-      >
-        {canDrag ? (
-          <span
-            data-renewal-drag-handle
-            onPointerDown={(event) => beginDrag(event, { policyId, policyNumber, stage })}
-            title="Arrastra para mover"
-            aria-hidden="true"
-            className="absolute left-2 top-2 z-10 inline-flex size-7 touch-none select-none items-center justify-center rounded-md text-muted-foreground/70 cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing"
-          >
-            <GripVertical className="size-4" />
-          </span>
-        ) : null}
-        {children}
-      </div>
+      {cardContent}
     </li>
   );
 }
