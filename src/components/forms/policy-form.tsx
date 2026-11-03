@@ -39,6 +39,7 @@ type PolicyFormProps = {
   description: string;
   submitLabel: string;
   cancelHref: string;
+  submitSuccessHref?: string;
   defaultValues: PolicyFormValues;
   originalTerm?: { startDate: string; endDate: string };
   clientOptions: SelectOption[];
@@ -60,6 +61,7 @@ export function PolicyForm({
   description,
   submitLabel,
   cancelHref,
+  submitSuccessHref,
   defaultValues,
   originalTerm,
   clientOptions,
@@ -154,7 +156,7 @@ export function PolicyForm({
       }
 
       toast.success(result.message);
-      router.push(result.redirectTo);
+      router.push(submitSuccessHref ?? result.redirectTo);
       router.refresh();
     });
   }

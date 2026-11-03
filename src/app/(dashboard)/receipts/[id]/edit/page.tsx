@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { updateReceipt } from "@/app/(dashboard)/receipts/actions";
 import { ReceiptForm } from "@/components/forms/receipt-form";
+import { normalizeReturnTo } from "@/lib/return-to";
 import { createReceiptDefaults, readReceiptPremiumUnits } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { CancelReceiptOnlyButton } from "@/components/receipts/cancel-receipt-button";
@@ -11,8 +12,10 @@ import { getPolicyOptionLabel } from "@/lib/policy-identity";
 import type { SelectOption } from "@/lib/domain-options";
 import { endorsementOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
-export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditReceiptPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
+  const query = (await searchParams) ?? {};
+  const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/receipts");
   const scope = await requireOrganizationPortfolioReadScope();
   const { receipt, policies, endorsements } = await withTenantTransaction(scope.context, async (db) => {
     const receipt = await db.receipt.findFirst({
@@ -86,7 +89,8 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
           title="Edición de recibo"
           description="Los cambios actualizan vistas de cobranza, cartera y riesgo. La fecha y el método de pago se ajustan manualmente en este formulario."
           submitLabel="Guardar cambios"
-          cancelHref="/receipts"
+          cancelHref={returnTo}
+          submitSuccessHref={returnTo}
           defaultValues={createReceiptDefaults({
             receiptNumber: receipt.receiptNumber,
             policyId: receipt.policyId,

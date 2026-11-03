@@ -3,6 +3,7 @@ vi.mock("server-only", () => ({}));
 
 const clientFindMany = vi.hoisted(() => vi.fn());
 const suppressionRuleFindMany = vi.hoisted(() => vi.fn());
+const receiptFindMany = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => {
   return {
@@ -13,11 +14,14 @@ vi.mock("@/lib/db", () => {
       dataQualitySuppressionRule: {
         findMany: suppressionRuleFindMany,
       },
+      receipt: {
+        findMany: receiptFindMany,
+      },
     }),
   };
 });
 
-import { getClientDataQualityScores, listActivePoliciesWithoutReceipts } from "./data-quality";
+import { getClientDataQualityScores, getCommissionReviewCandidates, listActivePoliciesWithoutReceipts } from "./data-quality";
 
 describe("active policies without receipts audit", () => {
   it("lists only active policies with the no-receipts issue", () => {
@@ -54,6 +58,7 @@ describe("active policies without receipts audit", () => {
 describe("data-quality client scoring", () => {
   beforeEach(() => {
     clientFindMany.mockReset();
+    receiptFindMany.mockReset();
     suppressionRuleFindMany.mockReset();
     suppressionRuleFindMany.mockResolvedValue([]);
   });
@@ -137,5 +142,83 @@ describe("data-quality client scoring", () => {
       where: { organizationId: "org-test", portfolioOwnerId: "agent-1", status: "ACTIVE" },
       select: expect.any(Object),
     });
+  });
+});
+
+describe("commission review candidates", () => {
+  beforeEach(() => {
+    receiptFindMany.mockReset();
+  });
+
+  it("loads payment-backed reviews plus unpaid pending and cancelled reviews within the organization", async () => {
+    receiptFindMany.mockResolvedValue([
+      {
+        id: "receipt-paid",
+        receiptNumber: "REC-PAID",
+        amount: 100,
+        currency: "MXN",
+        status: "PAID",
+        commissionCalculationStatus: "REVIEW",
+        commissionReviewReason: "Falta desglose.",
+        updatedAt: new Date("2026-11-01T00:00:00.000Z"),
+        payments: [{ id: "payment-posted" }],
+        policy: { id: "policy-1", policyNumber: "POL-1", client: { fullName: "Cliente" }, insurer: { name: "Aseguradora" } },
+      },
+      {
+        id: "receipt-cancelled-paid",
+        receiptNumber: "REC-CANCELLED-PAID",
+        amount: 100,
+        currency: "MXN",
+        status: "CANCELLED",
+        commissionCalculationStatus: "REVIEW",
+        commissionReviewReason: "Falta regla.",
+        updatedAt: new Date("2026-11-01T00:00:00.000Z"),
+        payments: [{ id: "payment-posted" }],
+        policy: { id: "policy-1", policyNumber: "POL-1", client: { fullName: "Cliente" }, insurer: { name: "Aseguradora" } },
+      },
+      {
+        id: "receipt-pending",
+        receiptNumber: "REC-PENDING",
+        amount: 100,
+        currency: "MXN",
+        status: "PENDING",
+        commissionCalculationStatus: "REVIEW",
+        commissionReviewReason: "Falta prima.",
+        updatedAt: new Date("2026-11-01T00:00:00.000Z"),
+        payments: [],
+        policy: { id: "policy-1", policyNumber: "POL-1", client: { fullName: "Cliente" }, insurer: { name: "Aseguradora" } },
+      },
+      {
+        id: "receipt-cancelled-unpaid",
+        receiptNumber: "REC-CANCELLED",
+        amount: 100,
+        currency: "MXN",
+        status: "CANCELLED",
+        commissionCalculationStatus: "REVIEW",
+        commissionReviewReason: "Falta prima.",
+        updatedAt: new Date("2026-11-01T00:00:00.000Z"),
+        payments: [],
+        policy: { id: "policy-1", policyNumber: "POL-1", client: { fullName: "Cliente" }, insurer: { name: "Aseguradora" } },
+      },
+    ]);
+
+    const candidates = await getCommissionReviewCandidates("org-test");
+
+    expect(candidates.map(({ receiptId, receiptStatus, postedPaymentCount }) => ({ receiptId, receiptStatus, postedPaymentCount }))).toEqual([
+      { receiptId: "receipt-paid", receiptStatus: "PAID", postedPaymentCount: 1 },
+      { receiptId: "receipt-cancelled-paid", receiptStatus: "CANCELLED", postedPaymentCount: 1 },
+      { receiptId: "receipt-pending", receiptStatus: "PENDING", postedPaymentCount: 0 },
+      { receiptId: "receipt-cancelled-unpaid", receiptStatus: "CANCELLED", postedPaymentCount: 0 },
+    ]);
+    expect(receiptFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        organizationId: "org-test",
+        OR: expect.arrayContaining([
+          { payments: { some: { organizationId: "org-test", status: "POSTED" } } },
+          { commissionCalculationStatus: "REVIEW", status: "PENDING", payments: { none: { organizationId: "org-test", status: "POSTED" } } },
+          { commissionCalculationStatus: "REVIEW", status: "CANCELLED", payments: { none: { organizationId: "org-test", status: "POSTED" } } },
+        ]),
+      }),
+    }));
   });
 });

@@ -11,4 +11,11 @@ describe("safe return navigation", () => {
   it("rejects external return destinations", () => {
     expect(normalizeReturnTo("https://example.com/bonuses", "/receipts")).toBe("/receipts");
   });
+
+  it("preserves a filtered Data Quality review queue as a safe return destination", () => {
+    const queue = "/data-quality?tab=revisiones&q=POL-123&page=2";
+    expect(normalizeReturnTo(queue, "/receipts")).toBe(queue);
+    expect(appendReturnTo("/receipts/receipt_123/edit", queue))
+      .toBe("/receipts/receipt_123/edit?returnTo=%2Fdata-quality%3Ftab%3Drevisiones%26q%3DPOL-123%26page%3D2");
+  });
 });

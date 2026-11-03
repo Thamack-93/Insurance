@@ -181,6 +181,7 @@ export type LedgerReviewIssue = {
 export type PremiumReconciliationReview = {
   id: string;
   kind: "POLICY" | "ENDORSEMENT";
+  sourceRecordId: string;
   policyId: string;
   policyNumber: string;
   recordLabel: string;
@@ -204,6 +205,8 @@ export type CommissionReviewCandidate = {
   currency: string;
   reason: string | null;
   calculationStatus: string;
+  receiptStatus: string;
+  postedPaymentCount: number;
   updatedAt: Date;
 };
 
@@ -602,6 +605,7 @@ export async function getPremiumReconciliationReviews(organizationId: string): P
           reviews.push({
             id: `policy:${policy.id}`,
             kind: "POLICY",
+            sourceRecordId: policy.id,
             policyId: policy.id,
             policyNumber: policy.policyNumber,
             recordLabel: policy.policyNumber,
@@ -625,6 +629,7 @@ export async function getPremiumReconciliationReviews(organizationId: string): P
         reviews.push({
           id: `endorsement:${endorsement.id}`,
           kind: "ENDORSEMENT",
+          sourceRecordId: endorsement.id,
           policyId: policy.id,
           policyNumber: policy.policyNumber,
           recordLabel: `${policy.policyNumber} · Endoso ${endorsement.endorsementNumber}`,
@@ -647,18 +652,34 @@ export async function getCommissionReviewCandidates(organizationId: string): Pro
     const receipts = await db.receipt.findMany({
       where: {
         organizationId,
-        status: { not: "CANCELLED" },
         commissionCalculationStatus: { in: ["NOT_CALCULATED", "REVIEW"] },
-        payments: { some: { organizationId, status: "POSTED" } },
+        OR: [
+          { payments: { some: { organizationId, status: "POSTED" } } },
+          {
+            commissionCalculationStatus: "REVIEW",
+            status: "PENDING",
+            payments: { none: { organizationId, status: "POSTED" } },
+          },
+          {
+            commissionCalculationStatus: "REVIEW",
+            status: "CANCELLED",
+            payments: { none: { organizationId, status: "POSTED" } },
+          },
+        ],
       },
       select: {
         id: true,
         receiptNumber: true,
         amount: true,
         currency: true,
+        status: true,
         commissionCalculationStatus: true,
         commissionReviewReason: true,
         updatedAt: true,
+        payments: {
+          where: { organizationId, status: "POSTED" },
+          select: { id: true },
+        },
         policy: {
           select: {
             id: true,
@@ -683,6 +704,8 @@ export async function getCommissionReviewCandidates(organizationId: string): Pro
       currency: receipt.currency,
       reason: receipt.commissionReviewReason,
       calculationStatus: receipt.commissionCalculationStatus,
+      receiptStatus: receipt.status,
+      postedPaymentCount: receipt.payments.length,
       updatedAt: receipt.updatedAt,
     }));
   });
