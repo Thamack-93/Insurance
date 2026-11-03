@@ -16,6 +16,12 @@ type RenewalDragSession = DraggedRenewal & {
   pointerId: number;
   startX: number;
   startY: number;
+  pointerX: number;
+  pointerY: number;
+  grabOffsetX: number;
+  grabOffsetY: number;
+  cardWidth: number;
+  cardHeight: number;
   isDragging: boolean;
   overStage: RenewalStage | null;
 };
@@ -49,6 +55,10 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
 
   function beginDrag(event: PointerEvent<HTMLSpanElement>, renewal: DraggedRenewal) {
     if (event.button !== 0 || pending || confirmationPending) return;
+    const card = event.currentTarget.closest<HTMLElement>("[data-renewal-card]");
+    const bounds = card?.getBoundingClientRect();
+    if (!card || !bounds) return;
+
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -57,6 +67,12 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      grabOffsetX: event.clientX - bounds.left,
+      grabOffsetY: event.clientY - bounds.top,
+      cardWidth: bounds.width,
+      cardHeight: bounds.height,
       isDragging: false,
       overStage: null,
     });
@@ -70,8 +86,9 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
     const overStage = isDragging ? stageAtPoint(event.clientX, event.clientY) : null;
     setSession((current) => {
       if (!current || current.pointerId !== event.pointerId) return current;
-      if (current.isDragging === isDragging && current.overStage === overStage) return current;
-      return { ...current, isDragging, overStage };
+      if (current.isDragging === isDragging && current.overStage === overStage
+        && current.pointerX === event.clientX && current.pointerY === event.clientY) return current;
+      return { ...current, pointerX: event.clientX, pointerY: event.clientY, isDragging, overStage };
     });
   }
 
@@ -286,7 +303,7 @@ export function RenewalBoardScrollArea({ children }: { children: ReactNode }) {
           isPanning ? "cursor-grabbing" : "cursor-grab",
         )}
       >
-        <div className="flex w-max items-start gap-3">{children}</div>
+        <div className="flex w-max items-stretch gap-3">{children}</div>
       </div>
       {canScrollForward ? (
         <div className="pointer-events-none absolute inset-y-0 right-0 z-10 flex items-center bg-gradient-to-l from-background via-background/90 to-transparent pb-3 pl-8 pr-1">
@@ -315,21 +332,43 @@ export function DraggableRenewalCard({
   const canDrag = stage !== "WON" && stage !== "LOST";
   const { session, beginDrag } = useRenewalDragContext();
   const isDragging = session?.policyId === policyId && session.isDragging;
+  const previewStyle = isDragging && session ? {
+    position: "fixed" as const,
+    top: 0,
+    left: 0,
+    width: session.cardWidth,
+    minHeight: session.cardHeight,
+    transform: `translate3d(${session.pointerX - session.grabOffsetX}px, ${session.pointerY - session.grabOffsetY}px, 0) scale(1.015)`,
+  } : undefined;
 
   return (
-    <li data-renewal-card className={cn("relative rounded-xl", isDragging && "opacity-50")}>
-      {canDrag ? (
-        <span
-          data-renewal-drag-handle
-          onPointerDown={(event) => beginDrag(event, { policyId, policyNumber, stage })}
-          title="Arrastra para mover"
-          aria-hidden="true"
-          className="absolute left-2 top-2 z-10 inline-flex size-7 touch-none select-none items-center justify-center rounded-md text-muted-foreground/70 cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing"
-        >
-          <GripVertical className="size-4" />
-        </span>
-      ) : null}
-      {children}
+    <li
+      data-renewal-card
+      className={cn("relative rounded-xl", isDragging && "border-2 border-dashed border-primary/35 bg-primary/5")}
+      style={isDragging && session ? { minHeight: session.cardHeight } : undefined}
+    >
+      <div
+        data-renewal-card-content
+        data-renewal-drag-preview={isDragging ? "true" : undefined}
+        className={cn(
+          "relative rounded-xl",
+          isDragging && "z-[100] cursor-grabbing bg-card shadow-2xl ring-2 ring-primary/30 pointer-events-none",
+        )}
+        style={previewStyle}
+      >
+        {canDrag ? (
+          <span
+            data-renewal-drag-handle
+            onPointerDown={(event) => beginDrag(event, { policyId, policyNumber, stage })}
+            title="Arrastra para mover"
+            aria-hidden="true"
+            className="absolute left-2 top-2 z-10 inline-flex size-7 touch-none select-none items-center justify-center rounded-md text-muted-foreground/70 cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing"
+          >
+            <GripVertical className="size-4" />
+          </span>
+        ) : null}
+        {children}
+      </div>
     </li>
   );
 }
@@ -352,7 +391,7 @@ export function RenewalDropColumn({
       data-renewal-drop-stage={stage}
       aria-label={`${renewalStageLabel(stage)}: ${count} renovaciones`}
       className={cn(
-        "flex w-72 shrink-0 snap-start flex-col self-start rounded-xl bg-muted/40 ring-1 ring-border transition-colors",
+        "flex w-72 shrink-0 snap-start flex-col rounded-xl bg-muted/40 ring-1 ring-border transition-colors",
         dragOver && stage === "LOST" && "bg-rose-50 ring-2 ring-rose-300 dark:bg-rose-950/30 dark:ring-rose-800",
         dragOver && stage !== "LOST" && "bg-primary/5 ring-2 ring-primary/30",
         stage === "WON" && session?.isDragging && "cursor-not-allowed",
