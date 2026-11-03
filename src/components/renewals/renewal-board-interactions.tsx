@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 
 type DraggedRenewal = { policyId: string; policyNumber: string; stage: RenewalStage };
 type RenewalDragSession = DraggedRenewal & {
+  phase: "dragging" | "awaiting-refresh" | "settling";
+  dropStage: RenewalStage | null;
   pointerId: number;
   startX: number;
   startY: number;
@@ -30,6 +32,7 @@ type RenewalDragContextValue = {
   session: RenewalDragSession | null;
   beginDrag: (event: PointerEvent<HTMLSpanElement>, renewal: DraggedRenewal) => void;
   refreshDropTarget: (x: number, y: number) => void;
+  settleDrop: (policyId: string, stage: RenewalStage, bounds: Pick<DOMRect, "left" | "top"> | null) => void;
 };
 
 const RenewalDragContext = createContext<RenewalDragContextValue | null>(null);
@@ -54,7 +57,7 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
   const [pending, startTransition] = useTransition();
 
   function beginDrag(event: PointerEvent<HTMLSpanElement>, renewal: DraggedRenewal) {
-    if (event.button !== 0 || pending || confirmationPending) return;
+    if (event.button !== 0 || pending || confirmationPending || session) return;
     const card = event.currentTarget.closest<HTMLElement>("[data-renewal-card]");
     const bounds = card?.getBoundingClientRect();
     if (!card || !bounds) return;
@@ -64,6 +67,8 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
     event.currentTarget.setPointerCapture(event.pointerId);
     setSession({
       ...renewal,
+      phase: "dragging",
+      dropStage: null,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -79,7 +84,7 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
   }
 
   function updateDragTarget(event: PointerEvent<HTMLDivElement>) {
-    if (!session || session.pointerId !== event.pointerId) return;
+    if (!session || session.phase !== "dragging" || session.pointerId !== event.pointerId) return;
     const moved = Math.hypot(event.clientX - session.startX, event.clientY - session.startY) >= DRAG_THRESHOLD;
     if (!moved && !session.isDragging) return;
     const isDragging = session.isDragging || moved;
@@ -94,14 +99,42 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
 
   function refreshDropTarget(x: number, y: number) {
     const overStage = stageAtPoint(x, y);
-    setSession((current) => current?.isDragging && current.overStage !== overStage
+    setSession((current) => current?.phase === "dragging" && current.isDragging && current.overStage !== overStage
       ? { ...current, overStage }
       : current);
   }
 
+  function settleDrop(policyId: string, stage: RenewalStage, bounds: Pick<DOMRect, "left" | "top"> | null) {
+    setSession((current) => {
+      if (!current || current.policyId !== policyId || current.dropStage !== stage || current.phase !== "awaiting-refresh") {
+        return current;
+      }
+      if (!bounds) return null;
+      return {
+        ...current,
+        phase: "settling",
+        pointerX: bounds.left + current.grabOffsetX,
+        pointerY: bounds.top + current.grabOffsetY,
+      };
+    });
+  }
+
+  useEffect(() => {
+    if (session?.phase !== "settling") return;
+    const policyId = session.policyId;
+    const timeout = window.setTimeout(() => {
+      setSession((current) => current?.policyId === policyId && current.phase === "settling" ? null : current);
+    }, 220);
+    return () => window.clearTimeout(timeout);
+  }, [session?.phase, session?.policyId]);
+
   function dropRenewal(renewal: DraggedRenewal, stage: RenewalStage) {
-    if (stage === renewal.stage) return;
+    if (stage === renewal.stage) {
+      setSession(null);
+      return;
+    }
     if (stage === "WON") {
+      setSession(null);
       toast.info("Para marcarla como renovada, captura primero la póliza nueva desde la tarjeta.");
       return;
     }
@@ -113,6 +146,7 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
     startTransition(async () => {
       const result = await setRenewalStage(renewal.policyId, stage);
       if (!result.ok) {
+        setSession(null);
         toast.error(result.error);
         return;
       }
@@ -123,12 +157,26 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
 
   function finishDrag(event: PointerEvent<HTMLDivElement>) {
     const active = session;
-    if (!active || active.pointerId !== event.pointerId) return;
-    setSession(null);
+    if (!active || active.phase !== "dragging" || active.pointerId !== event.pointerId) return;
 
     const moved = Math.hypot(event.clientX - active.startX, event.clientY - active.startY) >= DRAG_THRESHOLD;
     const targetStage = stageAtPoint(event.clientX, event.clientY);
-    if (moved && targetStage) dropRenewal(active, targetStage);
+    if (!moved || !targetStage) {
+      setSession(null);
+      return;
+    }
+
+    setSession((current) => current?.pointerId === event.pointerId
+      ? {
+          ...current,
+          phase: "awaiting-refresh",
+          dropStage: targetStage,
+          overStage: targetStage,
+          pointerX: event.clientX,
+          pointerY: event.clientY,
+        }
+      : current);
+    dropRenewal(active, targetStage);
   }
 
   function cancelDrag(event: PointerEvent<HTMLDivElement>) {
@@ -141,6 +189,7 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
     try {
       const result = await setRenewalStage(confirmation.policyId, "LOST");
       if (!result.ok) {
+        setSession(null);
         toast.error(result.error);
         return;
       }
@@ -153,11 +202,19 @@ export function RenewalBoardInteractions({ children }: { children: ReactNode }) 
   }
 
   return (
-    <RenewalDragContext.Provider value={{ session, beginDrag, refreshDropTarget }}>
+    <RenewalDragContext.Provider value={{ session, beginDrag, refreshDropTarget, settleDrop }}>
       <div onPointerMove={updateDragTarget} onPointerUp={finishDrag} onPointerCancel={cancelDrag}>
         {children}
       </div>
-      <AlertDialog open={Boolean(confirmation)} onOpenChange={(open) => !open && !confirmationPending && setConfirmation(null)}>
+      <AlertDialog
+        open={Boolean(confirmation)}
+        onOpenChange={(open) => {
+          if (!open && !confirmationPending) {
+            setConfirmation(null);
+            setSession(null);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Cerrar renovación de {confirmation?.policyNumber}?</AlertDialogTitle>
@@ -330,8 +387,19 @@ export function DraggableRenewalCard({
   children,
 }: DraggedRenewal & { children: ReactNode }) {
   const canDrag = stage !== "WON" && stage !== "LOST";
-  const { session, beginDrag } = useRenewalDragContext();
+  const { session, beginDrag, settleDrop } = useRenewalDragContext();
+  const cardRef = useRef<HTMLLIElement>(null);
   const isDragging = session?.policyId === policyId && session.isDragging;
+  const waitingForRefresh = session?.policyId === policyId
+    && session.phase === "awaiting-refresh"
+    && session.dropStage === stage;
+
+  useEffect(() => {
+    if (!waitingForRefresh) return;
+    const bounds = cardRef.current?.getBoundingClientRect();
+    settleDrop(policyId, stage, bounds ? { left: bounds.left, top: bounds.top } : null);
+  }, [policyId, settleDrop, stage, waitingForRefresh]);
+
   const previewStyle = isDragging && session ? {
     position: "fixed" as const,
     top: 0,
@@ -343,6 +411,7 @@ export function DraggableRenewalCard({
 
   return (
     <li
+      ref={cardRef}
       data-renewal-card
       className={cn("relative rounded-xl", isDragging && "border-2 border-dashed border-primary/35 bg-primary/5")}
       style={isDragging && session ? { minHeight: session.cardHeight } : undefined}
@@ -353,6 +422,7 @@ export function DraggableRenewalCard({
         className={cn(
           "relative rounded-xl",
           isDragging && "z-[100] cursor-grabbing bg-card shadow-2xl ring-2 ring-primary/30 pointer-events-none",
+          session?.policyId === policyId && session.phase === "settling" && "transition-transform duration-200 ease-out",
         )}
         style={previewStyle}
       >
