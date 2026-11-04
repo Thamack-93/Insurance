@@ -237,13 +237,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "La póliza origen ya no existe." }, { status: 404 });
     }
 
-    if (sourcePolicy && draft.policyNumber === sourcePolicy.policyNumber) {
-      return NextResponse.json(
-        { error: "La póliza nueva debe tener un número distinto a la póliza renovada." },
-        { status: 400 },
-      );
-    }
-
     if (sourcePolicy && payload.clientId !== sourcePolicy.clientId) {
       return NextResponse.json(
         { error: "La póliza origen debe pertenecer al mismo cliente." },
