@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { CarFront, ChevronDown, CircleDollarSign, FileText, MapPin, Users } from "lucide-react";
 import type { ReactNode } from "react";
@@ -26,9 +25,6 @@ type InsuredPerson = Extract<PolicyRiskDetails, { policyType: "GMM" }>["data"]["
 
 type PolicyRiskOverviewProps = {
   policyType: string;
-  clientId: string;
-  clientName: string;
-  insurerName: string;
   insuredObject: string | null;
   riskDetails: unknown;
   riskDetailsReviewRequired: boolean;
@@ -194,9 +190,6 @@ function HistoricalDescription({ value }: { value: string | null }) {
 
 export function PolicyRiskOverview({
   policyType,
-  clientId,
-  clientName,
-  insurerName,
   insuredObject,
   riskDetails,
   riskDetailsReviewRequired,
@@ -230,7 +223,6 @@ export function PolicyRiskOverview({
     isPrimary: party.isPrimary,
   }));
   const fallbackAssets = insuredAssets.filter((asset) => asset.assetType === policyType);
-  const displayedRiskType = policyType === "DANOS" ? "Daños" : policyType === "GMM" ? "Gastos médicos" : policyType === "AUTO" ? (vehicleRows.length > 1 ? "Flotilla" : "Vehículo asegurado") : "Riesgo asegurado";
   const coverageText = danosData?.coverageLimit?.trim() || null;
   const historicalDescription = insuredObject?.trim() || "";
   const hasStructuredRiskRows = vehicleRows.length > 0 || locationRows.length > 0 || personRows.length > 0;
@@ -248,10 +240,6 @@ export function PolicyRiskOverview({
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{policyType === "GMM" ? "Personas aseguradas" : policyType === "DANOS" ? "Bienes asegurados" : policyType === "AUTO" ? (vehicleRows.length > 1 ? "Flotilla" : "Vehículo asegurado") : "Objeto asegurado"}</p>
             {policyType !== "AUTO" && policyType !== "DANOS" && policyType !== "GMM" ? <div className="mt-2"><HistoricalDescription value={insuredObject || fallbackAssets[0]?.description || insuredParties[0]?.fullName || null} /></div> : null}
-            <p className="mt-1 text-xs text-muted-foreground">
-              <Link href={`/clients/${clientId}`} className="text-primary underline underline-offset-2 hover:decoration-2">{clientName}</Link>
-              {` · ${insurerName}`}{policyType === "AUTO" ? "" : ` · ${displayedRiskType}`}
-            </p>
           </div>
           {policyType === "AUTO" && vehicleRows.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">{vehicleRows.length} {vehicleRows.length === 1 ? "vehículo" : "vehículos"}</span> : null}
           {policyType === "DANOS" && locationRows.length ? <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">{locationRows.length} {locationRows.length === 1 ? "ubicación" : "ubicaciones"}</span> : null}
