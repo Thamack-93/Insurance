@@ -502,7 +502,7 @@ export function DraggableRenewalCard({
             data-renewal-card
             data-renewal-policy-id={policyId}
             data-renewal-card-sort-order={sortOrder}
-            className="relative rounded-xl"
+            className="pointer-events-none relative rounded-xl"
             style={{ order: optimisticMove.sortIndex * 2 - 1 }}
           >
             {cardContent}

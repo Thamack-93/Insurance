@@ -33,6 +33,8 @@ import { buildCanonicalHref } from "@/lib/navigation-redirects";
 import { withTenantTransaction } from "@/lib/organization-context";
 import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 import { RenewalFollowUpMenu } from "@/components/renewals/renewal-follow-up-menu";
+import { ClientActionOverview } from "@/components/clients/client-action-briefing";
+import { getClientActionOverview } from "@/lib/client-action-briefing";
 
 type OperationsView = "all" | "pending" | "renewals" | "claims";
 
@@ -239,7 +241,7 @@ export default async function OperationsPage({
         },
         ...(renewalListConditions.length ? { AND: renewalListConditions } : {}),
       };
-  const [workItems, workItemsPage, renewalPolicies, claimData] = await Promise.all([
+  const [workItems, workItemsPage, renewalPolicies, claimData, clientActionOverview] = await Promise.all([
     view === "all" ? getWorkItems({
       organizationId: scope.organizationId,
       statuses: OPEN_WORK_ITEM_STATUSES,
@@ -269,6 +271,7 @@ export default async function OperationsPage({
       }),
       claimTotal: await db.claim.count({ where: claimWhere }),
     })),
+    view === "all" ? getClientActionOverview(scope) : Promise.resolve([]),
   ]);
   const visibleWorkItems = workItemsPage?.items ?? workItems;
   const workItemsTotal = workItemsPage?.totalCount ?? workItems.length;
@@ -402,6 +405,7 @@ export default async function OperationsPage({
               </CardContent>
             </Card>
           </div>
+          <ClientActionOverview clients={clientActionOverview} />
         </>
       ) : null}
 

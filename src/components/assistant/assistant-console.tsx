@@ -464,7 +464,6 @@ export function AssistantConsole({
 
   useEffect(() => {
     if (restoredUserIdRef.current === userId) return;
-    restoredUserIdRef.current = userId;
     let cancelled = false;
     queueMicrotask(async () => {
       if (cancelled) return;
@@ -493,13 +492,13 @@ export function AssistantConsole({
             payload: remoteCapture.payload,
           });
         }
-        if (variant === "workspace" && window.location.search.includes("source=panel")) {
-          router.replace("/assistant", { scroll: false });
-        }
       } catch {
         // Browser storage is optional; continue with in-memory state.
       } finally {
-        if (!cancelled) setSessionReady(true);
+        if (!cancelled) {
+          restoredUserIdRef.current = userId;
+          setSessionReady(true);
+        }
       }
     });
     return () => { cancelled = true; };

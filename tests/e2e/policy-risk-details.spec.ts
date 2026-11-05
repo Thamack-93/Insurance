@@ -154,14 +154,17 @@ test.describe("structured policy risk details", () => {
       await expect(page.locator("#risk-AUTO-vehicles-0-year")).toHaveValue("2020");
       await expect(page.locator("#risk-AUTO-vehicles-0-vin")).toHaveValue("2T1BURHE0LC123456");
       await expect(page.locator("#risk-AUTO-vehicles-0-plates")).toHaveValue("ABC-123");
+      await page.locator("#premiumAmount").clear();
       await page.locator("#premiumAmount").fill("1500");
+      await expect(page.locator("#premiumAmount")).toHaveValue("1500");
       await page.locator("#risk-AUTO-vehicles-0-make").fill("Honda");
+      await page.locator("#risk-AUTO-vehicles-0-unitClass").selectOption("AUTO_PARTICULAR");
 
       await page.getByRole("combobox", { name: "Vendedor para bonos", exact: true }).click();
       await page.getByRole("option", { name: "CI Admin", exact: true }).click();
       await page.locator("#policyNumber").fill(renewalNumber);
       await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
-      await expect(page).toHaveURL(/\/policies\/[^/]+$/);
+      await expect(page).toHaveURL(/\/policies\/(?!new(?:[/?]|$))[^/]+$/);
       renewalId = new URL(page.url()).pathname.split("/").pop() ?? null;
       const comparison = page.locator("details").filter({ hasText: "Comparar con póliza anterior" });
       const comparisonHeading = comparison.getByRole("heading", { name: "Comparación de renovación" });

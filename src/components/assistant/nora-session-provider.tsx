@@ -44,6 +44,7 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
   const [loadError, setLoadError] = useState<string | null>(null);
   const [starterPrompt, setStarterPrompt] = useState<string | undefined>();
   const [snapshotAt, setSnapshotAt] = useState(0);
+  const [handoffReady, setHandoffReady] = useState(false);
   const requestRef = useRef<Promise<void> | null>(null);
   const handoffRef = useRef<(() => void) | null>(null);
 
@@ -92,7 +93,7 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
   const openWorkspace = useCallback(() => {
     handoffRef.current?.();
     setOpen(false);
-    router.push("/assistant?source=panel");
+    router.push("/assistant");
   }, [router]);
 
   return (
@@ -107,7 +108,7 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
                 <div className="min-w-0"><SheetTitle>Nora</SheetTitle><SheetDescription className="truncate">Asistente operativo</SheetDescription></div>
               </div>
               <div className="flex items-center gap-1">
-                <Button type="button" variant="ghost" size="icon" onClick={openWorkspace} aria-label="Abrir Nora en espacio completo"><ExternalLink className="size-4" /></Button>
+                <Button type="button" variant="ghost" size="icon" onClick={openWorkspace} disabled={!handoffReady} aria-label="Abrir Nora en espacio completo"><ExternalLink className="size-4" /></Button>
                 <Button type="button" variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Cerrar Nora"><X className="size-4" /></Button>
               </div>
             </div>
@@ -129,7 +130,7 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
               variant="panel"
               context={context}
               initialPrompt={starterPrompt}
-              onHandoffReady={(handoff) => { handoffRef.current = handoff; }}
+              onHandoffReady={(handoff) => { handoffRef.current = handoff; setHandoffReady(true); }}
               onContextChange={setContext}
               onConfirmed={value.refreshSnapshot}
             />

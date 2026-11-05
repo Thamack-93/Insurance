@@ -8,6 +8,8 @@ import {
 } from "../helpers/db";
 import { captureServerAction } from "../helpers/capture-server-action";
 
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
 test.describe("administración de usuarios", () => {
   test("elimina una cuenta inactiva y conserva su cartera operativa", async ({ page }) => {
     const db = getTestDb();
@@ -19,6 +21,14 @@ test.describe("administración de usuarios", () => {
     });
     const replacement = await db.user.create({
       data: { email: replacementEmail, name: "Delete Replacement", passwordHash: hashTestPassword("delete-replacement-123"), role: "AGENT", active: true },
+    });
+    await db.organizationMembership.createMany({
+      data: [target, replacement].map((user) => ({
+        organizationId: TEST_ORGANIZATION_ID,
+        userId: user.id,
+        role: "AGENT",
+        active: user.id === target.id ? false : true,
+      })),
     });
     let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | undefined;
 

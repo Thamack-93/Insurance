@@ -11,6 +11,7 @@ async function dragRenewalCardToStage(
   stage: Locator,
   targetArea: "header" | "card" | "empty" = "header",
 ) {
+  await expect(page.locator("[data-renewal-card-placeholder]")).toHaveCount(0);
   const viewport = page.locator("[data-renewal-board-viewport]");
   await handle.scrollIntoViewIfNeeded();
   const handleBounds = await handle.boundingBox();
@@ -22,17 +23,27 @@ async function dragRenewalCardToStage(
   const viewportRight = viewportBounds.x + viewportBounds.width;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
+  await page.mouse.move(startX + 12, startY + 4, { steps: 2 });
+  await expect(page.locator("[data-renewal-drag-preview='true']")).toBeVisible();
 
   const initialStageBounds = await stage.boundingBox();
   if (!initialStageBounds || initialStageBounds.x + initialStageBounds.width > viewportRight || initialStageBounds.x < viewportBounds.x) {
     const edgeX = viewportRight - 8;
     await page.mouse.move(edgeX, Math.min(Math.max(startY, viewportBounds.y + 24), viewportBounds.y + viewportBounds.height - 24), { steps: 8 });
+    const stageBounds = await stage.boundingBox();
+    if (!stageBounds) throw new Error("Renewal stage is not measurable during drag.");
+    const centerDelta = stageBounds.x + stageBounds.width / 2 - (viewportBounds.x + viewportBounds.width / 2);
+    await viewport.evaluate((element, delta) => {
+      const maximum = element.scrollWidth - element.clientWidth;
+      element.scrollLeft = Math.max(0, Math.min(maximum, element.scrollLeft + delta));
+    }, centerDelta);
     await expect.poll(async () => {
       const bounds = await stage.boundingBox();
       return Boolean(bounds && bounds.x < viewportRight && bounds.x + bounds.width > viewportBounds.x);
     }).toBe(true);
   }
 
+  await stage.scrollIntoViewIfNeeded();
   const stageBounds = await stage.boundingBox();
   if (!stageBounds) throw new Error("Renewal stage is not measurable after scrolling.");
   const dropX = Math.min(viewportRight - 8, Math.max(viewportBounds.x + 8, stageBounds.x + stageBounds.width / 2));
@@ -45,8 +56,12 @@ async function dragRenewalCardToStage(
   } else if (targetArea === "empty") {
     targetY = stageBounds.y + stageBounds.height - 12;
   }
-  const dropY = Math.min(viewportBounds.y + viewportBounds.height - 8, Math.max(viewportBounds.y + 8, targetY));
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
+  const dropY = Math.min(viewportHeight - 8, Math.max(8, targetY));
   await page.mouse.move(dropX, dropY, { steps: 8 });
+  await expect.poll(async () => page.evaluate(({ x, y }) =>
+    document.elementFromPoint(x, y)?.closest("[data-renewal-drop-stage]")?.getAttribute("data-renewal-drop-stage"),
+  { x: dropX, y: dropY })).toBe(await stage.getAttribute("data-renewal-drop-stage"));
   await expect(page.locator("[data-renewal-drag-preview='true']")).toBeVisible();
   await page.mouse.up();
 }

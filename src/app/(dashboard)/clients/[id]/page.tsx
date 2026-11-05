@@ -32,6 +32,8 @@ import { normalizeReturnTo } from "@/lib/return-to";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { policyObjectSearchTerms } from "@/lib/policy-identity";
 import { PolicyIdentity } from "@/components/policies/policy-identity";
+import { ClientActionBriefing } from "@/components/clients/client-action-briefing";
+import { getClientActionBriefingFromDb } from "@/lib/client-action-briefing";
 import { CalendarDays, ChevronDown } from "lucide-react";
 import { daysUntil, today } from "@/lib/dates";
 
@@ -88,7 +90,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       : {}),
   };
 
-  const [policies, receipts, workItems, claims, documents, referidos, activity, exactPolicyStats, exactReceiptCount, policyStatusCounts, totalPolicyCount, renewalCandidates] = await Promise.all([
+  const [policies, receipts, workItems, claims, documents, referidos, activity, exactPolicyStats, exactReceiptCount, policyStatusCounts, totalPolicyCount, renewalCandidates, clientActionBriefing] = await Promise.all([
     db.policy.findMany({
       where: policyWhere,
       include: {
@@ -160,6 +162,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
       take: 1,
     }),
+    getClientActionBriefingFromDb(scope, db, id),
   ]);
 
   const activePremium = toNumber(exactPolicyStats._sum.premiumAmount);
@@ -228,6 +231,8 @@ export default async function ClientDetailPage({ params, searchParams }: { param
             tone="blue"
           />
         </section>
+
+        <ClientActionBriefing actions={clientActionBriefing} />
 
         <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(18rem,0.8fr)]">
           <SectionCard title="Pólizas del cliente" description="Cartera completa. Ordenada por renovación y filtrable por estado.">
