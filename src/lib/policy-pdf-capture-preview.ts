@@ -18,7 +18,7 @@ import {
   scoreCaptureIdentity,
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
-import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
+import { buildPolicyNumberSearchVariants, normalizePolicyNumber } from "@/lib/policy-number";
 import { findSerialRenewalCandidatesForTarget } from "@/lib/policy-renewal-match";
 import { normalizePolicySerial } from "@/lib/policy-renewal-match.logic";
 import { clientOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
@@ -60,10 +60,16 @@ async function buildSourcePolicyCandidates(
   const ranked = new Map<string, { option: PolicyCaptureSourceOption; rank: number; exactNumber: boolean }>();
   const exactNumberVariants = draft.sourcePolicyNumber ? buildPolicyNumberSearchVariants(draft.sourcePolicyNumber) : [];
   const targetStartDate = draft.startDate ? parseDateInput(draft.startDate) : null;
+  const normalizedDraftPolicyNumber = normalizePolicyNumber(draft.policyNumber);
 
   function addRows(rows: SourceRow[], baseRank: number, exactNumber: boolean) {
     for (const policy of rows) {
-      if (policy.policyNumber === draft.policyNumber) continue;
+      // A renewal can keep the official policy number. In that case the
+      // preceding term is a valid source; a term that starts after the new
+      // one (or is still in force beyond its start) is not.
+      if (targetStartDate && policy.endDate > targetStartDate) continue;
+      const sameOfficialNumber = Boolean(normalizedDraftPolicyNumber) && normalizePolicyNumber(policy.policyNumber) === normalizedDraftPolicyNumber;
+      if (!targetStartDate && sameOfficialNumber) continue;
       const clientName = policy.client?.fullName ?? null;
       const insurerName = policy.insurer?.name ?? null;
       const clientScore = policy.client?.id === clientId
@@ -82,11 +88,13 @@ async function buildSourcePolicyCandidates(
       // let it win over an evidenced match.
       if (clientName && draft.clientName && clientScore === 0) continue;
 
-      const matchReason = exactNumber
-        ? "Número de póliza origen"
-        : policy.insuredAssets.some((asset) => normalizePolicySerial(asset.serialNumber) === normalizePolicySerial(draft.serialNumber))
-          ? "Serie y cliente"
-          : "Cliente y vigencia";
+      const matchReason = sameOfficialNumber
+        ? "Mismo número de póliza · vigencia anterior"
+        : exactNumber
+          ? "Número de póliza origen"
+          : policy.insuredAssets.some((asset) => normalizePolicySerial(asset.serialNumber) === normalizePolicySerial(draft.serialNumber))
+            ? "Serie y cliente"
+            : "Cliente y vigencia";
       const option: PolicyCaptureSourceOption = {
         id: policy.id,
         value: policy.id,
@@ -109,7 +117,7 @@ async function buildSourcePolicyCandidates(
       };
       const rank = baseRank + clientScore * 100 + insurerScore * 10 + policy.endDate.getTime() / 1e12;
       const current = ranked.get(policy.id);
-      if (!current || rank > current.rank) ranked.set(policy.id, { option, rank, exactNumber });
+      if (!current || rank > current.rank) ranked.set(policy.id, { option, rank, exactNumber: exactNumber || sameOfficialNumber });
     }
   }
 
@@ -147,6 +155,7 @@ async function buildSourcePolicyCandidates(
       where: {
         OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })),
         ...policyOperationalWhere(portfolioOwnerId, organizationId),
+        ...(targetStartDate ? { endDate: { lte: targetStartDate } } : {}),
       },
       orderBy: [{ startDate: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -178,7 +187,7 @@ async function buildSourcePolicyCandidates(
         clientId,
         policyType: draft.policyType,
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
-        ...(targetStartDate ? { endDate: { lt: targetStartDate } } : {}),
+        ...(targetStartDate ? { endDate: { lte: targetStartDate } } : {}),
       },
       orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -362,14 +371,27 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
 
   if (!input.draft.policyNumber) warnings.push("No pudimos detectar el número de póliza.");
   if (existingPolicyMatches.length > 0) {
-    const matchLabel = existingPolicyMatches
+    const priorTermsWithSameOfficialNumber = existingPolicyMatches.filter((policy) =>
+      normalizePolicyNumber(policy.policyNumber) === normalizePolicyNumber(input.draft.policyNumber) &&
+      Boolean(input.draft.startDate) &&
+      policy.endDate <= input.draft.startDate &&
+      scoreCaptureIdentity(input.draft.clientName, policy.clientName) === 100 &&
+      scoreCaptureIdentity(input.draft.insurerName, policy.insurerName) === 100,
+    );
+    const otherExistingMatches = existingPolicyMatches.filter((policy) => !priorTermsWithSameOfficialNumber.includes(policy));
+    const matchLabel = otherExistingMatches
       .map((policy) => `${policy.policyNumber} · ${policy.clientName} · ${policy.insurerName}`)
       .join(" | ");
-    warnings.push(
-      existingPolicyMatches.length === 1
-        ? `Ya existe una póliza equivalente: ${matchLabel}. Revisa si esta captura debe actualizar o enlazar el registro existente.`
-        : `Encontramos pólizas equivalentes o muy cercanas: ${matchLabel}. Revisa si ya está capturada.`,
-    );
+    if (priorTermsWithSameOfficialNumber.length > 0) {
+      warnings.push("Encontramos una vigencia anterior con el mismo número oficial. Conserva ese número y confirma el vínculo de renovación; las fechas distinguen cada vigencia.");
+    }
+    if (otherExistingMatches.length > 0) {
+      warnings.push(
+        otherExistingMatches.length === 1
+          ? `Ya existe una póliza equivalente: ${matchLabel}. Revisa si esta captura debe actualizar o enlazar el registro existente.`
+          : `Encontramos pólizas equivalentes o muy cercanas: ${matchLabel}. Revisa si ya está capturada.`,
+      );
+    }
   }
   if (!input.draft.clientName) warnings.push("No pudimos detectar el asegurado principal.");
   if (!input.draft.insurerName) warnings.push("No pudimos detectar la aseguradora.");

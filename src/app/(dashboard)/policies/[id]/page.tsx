@@ -218,7 +218,14 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
         <PageHeader
           eyebrow={`CRM · ${policyTypeLabel(policy.policyType)}`}
           title={policy.policyNumber}
-          description={`${policy.client.fullName} · ${policy.insurer.name}`}
+          description={
+            <>
+              <Link href={`/clients/${policy.clientId}`} className="text-primary underline underline-offset-2 hover:decoration-2">
+                {policy.client.fullName}
+              </Link>
+              {` · ${policy.insurer.name}`}
+            </>
+          }
           actions={
             <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
               <StatusBadge status={policy.status} />
@@ -272,9 +279,6 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
 
         <PolicyRiskOverview
           policyType={policy.policyType}
-          clientId={policy.clientId}
-          clientName={policy.client.fullName}
-          insurerName={policy.insurer.name}
           insuredObject={policy.insuredObject}
           riskDetails={policy.riskDetails}
           riskDetailsReviewRequired={policy.riskDetailsReviewRequired}
