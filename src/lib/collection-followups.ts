@@ -7,6 +7,7 @@ import { upsertWorkItemFromSource } from "@/lib/work-items";
 import { createNotificationEvent } from "@/lib/notification-foundation";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { isPaidWithinTolerance, PAYMENT_CLOSE_TOLERANCE } from "@/lib/receipt-reconciliation";
+import { formatBusinessDateInput } from "@/lib/business-dates";
 
 export const COLLECTION_OUTCOMES = ["NO_ANSWER", "CONTACTED", "PROMISED_PAYMENT", "DISPUTED", "WRONG_CONTACT"] as const;
 export type CollectionOutcome = (typeof COLLECTION_OUTCOMES)[number];
@@ -131,14 +132,16 @@ export async function runCollectionFollowUpScan(organizationId: string, now = ne
     for (const item of items) {
       const metadata = metadataFromWorkItem(item);
       const promised = typeof metadata.promisedPaymentDate === "string" ? new Date(metadata.promisedPaymentDate) : null;
+      const promisedDay = promised && Number.isFinite(promised.getTime()) ? formatBusinessDateInput(promised) : "";
+      const today = formatBusinessDateInput(now);
       const due = item.dueDate && item.dueDate <= now;
       const paidByPromise = promised && item.receipt
-        ? item.receipt.payments.reduce((total, payment) => payment.paidDate <= promised ? total + Number(payment.amount) : total, 0)
+        ? item.receipt.payments.reduce((total, payment) => formatBusinessDateInput(payment.paidDate) <= promisedDay ? total + Number(payment.amount) : total, 0)
         : 0;
       const qualifyingPayment = promised && item.receipt
         ? isPaidWithinTolerance(Number(item.receipt.amount), paidByPromise, PAYMENT_CLOSE_TOLERANCE)
         : false;
-      const brokenPromise = Boolean(promised && promised < now && metadata.outcome === "PROMISED_PAYMENT" && !qualifyingPayment);
+      const brokenPromise = Boolean(promisedDay && promisedDay < today && metadata.outcome === "PROMISED_PAYMENT" && !qualifyingPayment);
       if (!due && !brokenPromise) continue;
       if (due) summary.due += 1;
       if (brokenPromise) summary.brokenPromises += 1;

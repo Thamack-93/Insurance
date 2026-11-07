@@ -75,7 +75,7 @@ describe("collection follow-up promise scan", () => {
   });
 
   it("does not count a payment effective after the promise date", async () => {
-    setup([makeItem(1000, [{ amount: 1000, paidDate: new Date("2026-10-09T12:00:01.000Z") }])]);
+    setup([makeItem(1000, [{ amount: 1000, paidDate: new Date("2026-10-10T06:00:00.000Z") }])]);
 
     const result = await runCollectionFollowUpScan("org-1", now);
 
@@ -92,6 +92,23 @@ describe("collection follow-up promise scan", () => {
     const result = await runCollectionFollowUpScan("org-1", now);
 
     expect(result.brokenPromises).toBe(0);
+  });
+
+  it("allows payment through the end of the promised business day", async () => {
+    setup([makeItem(1000, [{ amount: 1000, paidDate: new Date("2026-10-09T23:59:00.000Z") }])]);
+
+    const result = await runCollectionFollowUpScan("org-1", now);
+
+    expect(result.brokenPromises).toBe(0);
+  });
+
+  it("does not mark a promise broken during its promised business day", async () => {
+    setup([makeItem(1000, [])]);
+
+    const result = await runCollectionFollowUpScan("org-1", new Date("2026-10-09T20:00:00.000Z"));
+
+    expect(result.brokenPromises).toBe(0);
+    expect(mocks.createNotificationEvent).not.toHaveBeenCalled();
   });
 
   it("uses the existing close tolerance and queries posted payments only", async () => {
