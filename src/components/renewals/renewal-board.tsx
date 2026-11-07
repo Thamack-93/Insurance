@@ -132,13 +132,14 @@ function RenewalCard({ card, isDemo, isDraggable }: { card: RenewalBoardCard; is
         ) : null}
         {card.renewedToPolicyId || captureHref ? (
           <div className="flex justify-end">
+            <Link href={`/renewals/${card.policyId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Preparar renovación</Link>
             {card.renewedToPolicyId ? (
               <Link href={`/policies/${card.renewedToPolicyId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Ver renovación</Link>
             ) : captureHref ? (
               <Link href={captureHref} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Capturar renovación</Link>
             ) : null}
           </div>
-        ) : null}
+        ) : <div className="flex justify-end"><Link href={`/renewals/${card.policyId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Preparar renovación</Link></div>}
         {!isTerminalRenewalStage(card.stage) ? (
           <div className="flex flex-wrap items-center justify-start gap-2">
             <RenewalWhatsAppAssistant policyId={card.policyId} policyNumber={card.policyNumber} clientName={card.clientName} stage={card.stage} isDemo={isDemo} />
