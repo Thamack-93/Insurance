@@ -1,4 +1,4 @@
-import { createPolicy, findPolicyRenewalCandidates } from "@/app/(dashboard)/policies/actions";
+import { createPolicy, findPolicyRenewalCandidates, getPolicyRenewalReviewSource } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
@@ -134,6 +134,7 @@ export default async function NewPolicyPage({
         insurer: { select: { id: true, name: true } },
         insuredAssets: { select: { description: true, serialNumber: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
         insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        renewals: { select: { id: true }, take: 1 },
       },
     }));
 
@@ -146,6 +147,8 @@ export default async function NewPolicyPage({
           clientName: source.client.fullName,
           insurerId: source.insurerId,
           insurerName: source.insurer.name,
+          status: source.status,
+          hasRenewal: source.renewals.length > 0,
           bonusSellerId: source.bonusSellerId,
           policyType: source.policyType as PolicyRenewalSource["policyType"],
           startDate: source.startDate,
@@ -232,6 +235,7 @@ export default async function NewPolicyPage({
           showRenewalLink={true}
           submitAction={createPolicy}
           findRenewalCandidates={findPolicyRenewalCandidates}
+          loadRenewalSource={getPolicyRenewalReviewSource}
         />
       </div>
     </div>
