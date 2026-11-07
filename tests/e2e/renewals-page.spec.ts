@@ -238,7 +238,9 @@ test.describe("Renewals Page (/renewals)", () => {
       await expect(page.getByRole("link", { name: fixture.policyNumber }).first()).toHaveAttribute("href", `/policies/${fixture.policyId}`);
       await expect(page.getByText("PREP-OPEN", { exact: false })).toBeVisible();
       await expect(page.getByText("PREP-CANCELLED", { exact: false })).toHaveCount(0);
-      await expect(page.getByRole("link", { name: "Confirmar uso del vehículo" })).toHaveAttribute("href", `/tasks/${openTask.id}`);
+      const openTaskLink = page.locator(`a[href="/tasks/${openTask.id}"]`);
+      await expect(openTaskLink).toHaveCount(1);
+      await expect(openTaskLink).toHaveText("Confirmar uso del vehículo");
       await expect(page.getByText("Tarea ya resuelta de prueba", { exact: true })).toHaveCount(0);
       await expect(page.getByText("Automóvil de preparación", { exact: true })).toBeVisible();
       await expect(page.getByText("Persona asegurada de prueba", { exact: false })).toBeVisible();
