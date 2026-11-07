@@ -211,7 +211,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
   const [selectedInsurerLabel, setSelectedInsurerLabel] = useState("");
   const [selectedSourcePolicyId, setSelectedSourcePolicyId] = useState("");
   const [selectedSourcePolicyLabel, setSelectedSourcePolicyLabel] = useState("");
-  const [carryForwardRiskConfirmed, setCarryForwardRiskConfirmed] = useState(false);
+  const [confirmedRiskSourceKey, setConfirmedRiskSourceKey] = useState<string | null>(null);
   const [showInlineClient, setShowInlineClient] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lookupOpen, setLookupOpen] = useState(false);
@@ -225,10 +225,13 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
   const operationControllerRef = useRef<AbortController | null>(null);
   const file = files[0] ?? null;
   const missingConfirmedRisk = draft ? !hasPolicyRiskData(draft.riskDetails) : false;
-  // The confirmation belongs to the exact selected predecessor and risk draft.
-  useEffect(() => {
-    setCarryForwardRiskConfirmed(false);
-  }, [selectedSourcePolicyId, draft?.riskDetails, draft?.policyType]);
+  // Source + document context determines whether this specific reuse was confirmed.
+  // Changing the source, client, insurer or risk draft invalidates confirmation.
+  const riskSourceKey = JSON.stringify([
+    selectedSourcePolicyId, selectedClientId, selectedInsurerId, draft?.policyType,
+    draft?.riskDetails, draft?.startDate, draft?.endDate,
+  ]);
+  const carryForwardRiskConfirmed = confirmedRiskSourceKey === riskSourceKey;
 
   const receiptPlan = useMemo(
     () => (draft ? mergePolicyPdfCaptureReceiptPlan(draft, receiptPlanOverrides, preview?.receiptEvidence) : []),
@@ -1699,7 +1702,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                       <input
                         type="checkbox"
                         checked={carryForwardRiskConfirmed}
-                        onChange={(event) => setCarryForwardRiskConfirmed(event.target.checked)}
+                        onChange={(event) => setConfirmedRiskSourceKey(event.target.checked ? riskSourceKey : null)}
                         className="mt-0.5 size-4 shrink-0"
                       />
                       <span>
