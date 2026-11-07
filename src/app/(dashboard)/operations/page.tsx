@@ -452,7 +452,7 @@ export default async function OperationsPage({
                         <TableCell>{policy.client.fullName}</TableCell>
                         <TableCell>{policy.insurer.name}</TableCell>
                         <TableCell><span className="font-mono text-xs">{formatDate(policy.endDate)}</span><span className="ml-2 text-xs text-amber-700 dark:text-amber-300">{formatBusinessDateRelative(policy.endDate)}</span></TableCell>
-                        <TableCell className="text-right"><Link href={appendReturnTo(`/policies/new?renewalFrom=${policy.id}`, returnTo)} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-10")}>Renovar</Link></TableCell>
+                        <TableCell className="text-right"><div className="flex justify-end gap-2"><Link href={`/renewals/${policy.id}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "min-h-10")}>Preparar</Link><Link href={appendReturnTo(`/policies/new?renewalFrom=${policy.id}`, returnTo)} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-10")}>Renovar</Link></div></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
