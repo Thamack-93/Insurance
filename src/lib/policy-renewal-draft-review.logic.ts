@@ -49,6 +49,11 @@ function identitySet(value: unknown): { type: string; values: string[]; total: n
 }
 
 export function getRenewalDraftFingerprint(sourceId: string, draft: Draft): string {
+  // React Hook Form watches raw input strings; the submit resolver coerces
+  // numbers and applies risk defaults. Both must produce the same review key.
+  const parsedRisk = policyRiskDetailsSchema.safeParse(draft.riskDetails);
+  const money = (value: number | string | undefined) =>
+    value === "" || value === undefined ? "" : Number(value);
   return JSON.stringify({
     sourceId,
     clientId: draft.clientId,
@@ -57,13 +62,13 @@ export function getRenewalDraftFingerprint(sourceId: string, draft: Draft): stri
     policyNumber: draft.policyNumber,
     startDate: draft.startDate,
     endDate: draft.endDate,
-    premiumAmount: draft.premiumAmount,
+    premiumAmount: money(draft.premiumAmount),
     currency: draft.currency,
     paymentFrequency: draft.paymentFrequency,
-    riskDetails: draft.riskDetails,
-    premiumIssuanceExpenseAmount: draft.premiumIssuanceExpenseAmount,
-    premiumSurchargeAmount: draft.premiumSurchargeAmount,
-    premiumDiscountAmount: draft.premiumDiscountAmount,
+    riskDetails: parsedRisk.success ? parsedRisk.data : draft.riskDetails,
+    premiumIssuanceExpenseAmount: money(draft.premiumIssuanceExpenseAmount),
+    premiumSurchargeAmount: money(draft.premiumSurchargeAmount),
+    premiumDiscountAmount: money(draft.premiumDiscountAmount),
   });
 }
 
