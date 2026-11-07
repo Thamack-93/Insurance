@@ -22,6 +22,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PolicyRenewalSelector } from "@/components/policies/policy-renewal-selector";
+import { PolicyRenewalDraftReview } from "@/components/policies/policy-renewal-draft-review";
+import { buildRenewalDraftReview, getRenewalDraftFingerprint } from "@/lib/policy-renewal-draft-review.logic";
 import { PolicyRiskDetailsFields } from "@/components/forms/policy-risk-details-fields";
 import { PolicyBonusEvidenceFields } from "@/components/forms/policy-bonus-evidence-fields";
 import { emptyPolicyRiskDetails } from "@/lib/policy-risk-details";
@@ -47,6 +49,7 @@ type PolicyFormProps = {
   bonusSellerOptions?: SelectOption[];
   canSelectBonusSeller?: boolean;
   renewalSource?: PolicyRenewalSource | null;
+  loadRenewalSource?: (id: string) => Promise<PolicyRenewalSource | null>;
   showRenewalLink?: boolean;
   renewalSearchScope?: "portfolio" | "all";
   submitAction: (values: PolicyFormValues) => Promise<MutationResult>;
@@ -69,6 +72,7 @@ export function PolicyForm({
   bonusSellerOptions = [],
   canSelectBonusSeller = false,
   renewalSource = null,
+  loadRenewalSource,
   showRenewalLink = false,
   renewalSearchScope = "portfolio",
   submitAction,
@@ -90,6 +94,7 @@ export function PolicyForm({
     resolver: zodResolver(originalTerm ? policyUpdateSchemaForOriginalTerm(originalTerm) : policySchema) as never,
     defaultValues,
   });
+  const watchedDraft = useWatch({ control }) as PolicyFormValues;
   const selectedPolicyType = useWatch({ control, name: "policyType" });
   const watchedClientId = useWatch({ control, name: "clientId" });
   const watchedStartDate = useWatch({ control, name: "startDate" });
@@ -101,6 +106,9 @@ export function PolicyForm({
   const watchedRiskDetails = useWatch({ control, name: "riskDetails" });
   const watchedBonusEligibilityJson = useWatch({ control, name: "bonusEligibilityJson" });
   const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
+  const [verifiedRenewalSource, setVerifiedRenewalSource] = useState<PolicyRenewalSource | null>(renewalSource);
+  const [reviewSourceLoading, setReviewSourceLoading] = useState(false);
+  const [reviewedFingerprint, setReviewedFingerprint] = useState<string | null>(null);
   const [renewalCandidateResult, setRenewalCandidateResult] = useState<{ key: string; candidates: SerialRenewalCandidate[] } | null>(null);
   const vehicles = selectedPolicyType === "AUTO" && watchedRiskDetails && typeof watchedRiskDetails === "object"
     ? ((watchedRiskDetails as { data?: { vehicles?: Array<{ vin?: string }> } }).data?.vehicles ?? [])
@@ -144,9 +152,70 @@ export function PolicyForm({
   }, [findRenewalCandidates, renewalCandidateKey]);
 
   const renewalCandidates = renewalCandidateResult?.key === renewalCandidateKey ? renewalCandidateResult.candidates : [];
+  const reviewRequired = Boolean(
+    renewedFromPolicyId &&
+    (!originalTerm || renewedFromPolicyId !== (defaultValues.renewedFromPolicyId ?? "")),
+  );
+
+  useEffect(() => {
+    if (!reviewRequired || !renewedFromPolicyId) {
+      setVerifiedRenewalSource(null);
+      setReviewSourceLoading(false);
+      return;
+    }
+    if (renewalSource?.id === renewedFromPolicyId && renewalSource.updatedAt) {
+      setVerifiedRenewalSource(renewalSource);
+      setReviewSourceLoading(false);
+      return;
+    }
+    if (!loadRenewalSource) {
+      setVerifiedRenewalSource(null);
+      setReviewSourceLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setVerifiedRenewalSource(null);
+    setReviewSourceLoading(true);
+    void loadRenewalSource(renewedFromPolicyId)
+      .then((source) => { if (!cancelled) setVerifiedRenewalSource(source); })
+      .catch(() => { if (!cancelled) setVerifiedRenewalSource(null); })
+      .finally(() => { if (!cancelled) setReviewSourceLoading(false); });
+    return () => { cancelled = true; };
+  }, [reviewRequired, renewedFromPolicyId, renewalSource, loadRenewalSource]);
+
+  const resolvedRenewalSource = verifiedRenewalSource?.id === renewedFromPolicyId ? verifiedRenewalSource : null;
+  const sourceVersion = resolvedRenewalSource?.updatedAt
+    ? new Date(resolvedRenewalSource.updatedAt).toISOString()
+    : null;
+  const renewalReview = reviewRequired && resolvedRenewalSource && sourceVersion
+    ? buildRenewalDraftReview(resolvedRenewalSource, watchedDraft)
+    : null;
+  const draftFingerprint = renewalReview && sourceVersion
+    ? getRenewalDraftFingerprint(`${renewedFromPolicyId}:${sourceVersion}`, watchedDraft)
+    : null;
+  const reviewConfirmed = Boolean(draftFingerprint && !renewalReview?.issue && reviewedFingerprint === draftFingerprint);
 
   async function onSubmit(values: PolicyFormValues) {
     startTransition(async () => {
+      const mustReview = Boolean(
+        values.renewedFromPolicyId &&
+        (!originalTerm || values.renewedFromPolicyId !== (defaultValues.renewedFromPolicyId ?? "")),
+      );
+      if (mustReview) {
+        const source = resolvedRenewalSource?.id === values.renewedFromPolicyId ? resolvedRenewalSource : null;
+        const version = source?.updatedAt ? new Date(source.updatedAt).toISOString() : null;
+        const reviewed = source ? buildRenewalDraftReview(source, values) : null;
+        const currentFingerprint = source && version
+          ? getRenewalDraftFingerprint(`${source.id}:${version}`, values)
+          : null;
+        if (!source || !version || !reviewed || reviewed.issue || !currentFingerprint || reviewedFingerprint !== currentFingerprint) {
+          const message = reviewed?.issue ?? "Verifica la póliza anterior y confirma los cambios antes de guardar.";
+          setError("root", { message });
+          toast.error(message);
+          return;
+        }
+        values = { ...values, renewalReviewConfirmed: true, renewalSourceUpdatedAt: version };
+      }
       const result = await submitAction(values);
 
       if (!result.ok) {
@@ -396,6 +465,16 @@ export function PolicyForm({
               ) : <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">Solo administración registra evidencia de elegibilidad para bonos.</p>
             ) : null}
           </FormSection>
+
+          {reviewRequired ? (
+            <PolicyRenewalDraftReview
+              source={resolvedRenewalSource}
+              loading={reviewSourceLoading}
+              result={renewalReview}
+              confirmed={reviewConfirmed}
+              onConfirm={(checked) => setReviewedFingerprint(checked ? draftFingerprint : null)}
+            />
+          ) : null}
 
           <FormActions cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
         </form>
