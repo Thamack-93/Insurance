@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { createPolicy, findPolicyRenewalCandidates, getPolicyRenewalReviewSource } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
@@ -169,6 +170,9 @@ export default async function NewPolicyPage({
       }
     }
   }
+
+  // An explicit renewal link must not silently become a standalone policy.
+  if (params.renewalFrom && !renewalSource) notFound();
 
   const defaultInsurerId = mostUsedInsurer[0]?.insurerId;
   const telegramDraftOverrides = Object.fromEntries(
