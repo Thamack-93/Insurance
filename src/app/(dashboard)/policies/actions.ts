@@ -469,6 +469,9 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           policyNumber: true,
           clientId: true,
           insurerId: true,
+          policyType: true,
+          startDate: true,
+          endDate: true,
           familyRootId: true,
           status: true,
         },
@@ -483,6 +486,15 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       if (nextRenewalSource.insurerId !== normalized.insurerId) {
         return errorResult("Para cambiar de aseguradora, confirma una sugerencia vigente por serie/VIN desde Renovaciones.");
       }
+      const linkIssue = validateRenewalLink(nextRenewalSource, {
+        id,
+        clientId: normalized.clientId,
+        insurerId: normalized.insurerId,
+        policyType: normalized.policyType,
+        startDate: normalized.startDate,
+        endDate: normalized.endDate,
+      });
+      if (linkIssue) return errorResult(linkIssue);
     }
 
     const policy = await withTenantTransaction(context, async (tx) => {
@@ -498,12 +510,24 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           confirmedBonusSellerId = clientOwner?.portfolioOwnerId ?? null;
         }
       }
-      const currentRenewalSource = renewalChanged && nextRenewalSource
+      const currentRenewalSource = nextRenewalSource
         ? await tx.policy.findFirst({
             where: { id: nextRenewalSource.id, organizationId: context.organizationId },
-            select: { id: true, clientId: true, insurerId: true, familyRootId: true, status: true, renewals: { select: { id: true }, take: 1 } },
+            select: { id: true, clientId: true, insurerId: true, policyType: true, startDate: true, endDate: true, familyRootId: true, status: true, renewals: { select: { id: true }, take: 1 } },
           })
         : null;
+      if (nextRenewalSource) {
+        if (!currentRenewalSource) throw new Error("La póliza origen ya no está disponible.");
+        const linkIssue = validateRenewalLink(currentRenewalSource, {
+          id,
+          clientId: normalized.clientId,
+          insurerId: normalized.insurerId,
+          policyType: normalized.policyType,
+          startDate: normalized.startDate,
+          endDate: normalized.endDate,
+        });
+        if (linkIssue) throw new Error(linkIssue);
+      }
       if (renewalChanged && nextRenewalSource && (!currentRenewalSource
         || currentRenewalSource.clientId !== normalized.clientId
         || currentRenewalSource.insurerId !== normalized.insurerId
@@ -570,13 +594,13 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
             },
           });
 
-          await tx.policy.update({
-            where: { id: currentRenewalSource.id, organizationId: context.organizationId },
-            data: {
-              status: "RENEWED",
-              updatedById: userId,
-            },
+          const claimed = await tx.policy.updateMany({
+            where: { id: currentRenewalSource.id, organizationId: context.organizationId, status: { not: "RENEWED" } },
+            data: { status: "RENEWED", updatedById: userId },
           });
+          if (claimed.count !== 1) {
+            throw new Error("Esta póliza ya se renovó. Actualiza la página antes de continuar.");
+          }
           await closeRenewalWorkItems(tx, context.organizationId, currentRenewalSource.id, userId);
         } else {
           await tx.policy.update({
