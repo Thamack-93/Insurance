@@ -148,6 +148,7 @@ export default async function NewPolicyPage({
           insurerId: source.insurerId,
           insurerName: source.insurer.name,
           status: source.status,
+          updatedAt: source.updatedAt,
           hasRenewal: source.renewals.length > 0,
           bonusSellerId: source.bonusSellerId,
           policyType: source.policyType as PolicyRenewalSource["policyType"],
