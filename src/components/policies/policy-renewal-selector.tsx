@@ -145,8 +145,8 @@ export function PolicyRenewalSelector({
               {displayedPolicy?.clientName ?? "Sin cliente"} · {displayedPolicy?.insurerName ?? "Sin aseguradora"}
             </p>
             {displayedPolicy?.insuredObject ? (
-              <p className="truncate text-xs text-muted-foreground" title={pickedPolicy.insuredObject}>
-                {pickedPolicy.insuredObject}
+              <p className="truncate text-xs text-muted-foreground" title={displayedPolicy.insuredObject}>
+                {displayedPolicy.insuredObject}
               </p>
             ) : null}
           </div>
