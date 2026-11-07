@@ -203,7 +203,7 @@ test.describe("Renewals Page (/renewals)", () => {
         insurerId: fixture.insurerId,
         periodStartDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
         periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-        dueDate: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000),
+        dueDate: new Date(now.getTime() + 20 * 24 * 60 * 60 * 1000),
         amount: 1200,
         currency: "MXN",
       };
