@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -75,12 +75,10 @@ export function PolicyRenewalSelector({
 }: PolicyRenewalSelectorProps) {
   const [open, setOpen] = useState(false);
   const [pickedPolicy, setPickedPolicy] = useState<PolicyRenewalSource | null>(() => selectedPolicy ?? null);
-  // Replace search-result placeholder labels with the authorized source read.
-  useEffect(() => {
-    if (selectedPolicy?.id === value) setPickedPolicy(selectedPolicy);
-  }, [selectedPolicy, value]);
-  const selectedLabel = pickedPolicy
-    ? `${pickedPolicy.policyNumber} · ${pickedPolicy.clientName} · ${pickedPolicy.insurerName}`
+  // Prefer the authorized server data over placeholder search-result labels.
+  const displayedPolicy = selectedPolicy?.id === value ? selectedPolicy : pickedPolicy;
+  const selectedLabel = displayedPolicy
+    ? `${displayedPolicy.policyNumber} · ${displayedPolicy.clientName} · ${displayedPolicy.insurerName}`
     : null;
 
   return (
@@ -141,12 +139,12 @@ export function PolicyRenewalSelector({
               <Badge variant="outline" className="rounded-full">
                 Seleccionada
               </Badge>
-              <span className="font-medium text-foreground">{pickedPolicy?.policyNumber}</span>
+              <span className="font-medium text-foreground">{displayedPolicy?.policyNumber}</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              {pickedPolicy?.clientName ?? "Sin cliente"} · {pickedPolicy?.insurerName ?? "Sin aseguradora"}
+              {displayedPolicy?.clientName ?? "Sin cliente"} · {displayedPolicy?.insurerName ?? "Sin aseguradora"}
             </p>
-            {pickedPolicy?.insuredObject ? (
+            {displayedPolicy?.insuredObject ? (
               <p className="truncate text-xs text-muted-foreground" title={pickedPolicy.insuredObject}>
                 {pickedPolicy.insuredObject}
               </p>
@@ -177,8 +175,8 @@ export function PolicyRenewalSelector({
         description="Busca la póliza anterior para enlazar esta nueva vigencia."
         placeholder="Póliza, objeto asegurado, cliente, aseguradora..."
         sourceLabel={selectedLabel ?? "Sin vínculo"}
-        initialQuery={pickedPolicy?.policyNumber ?? ""}
-        suggestions={pickedPolicy ? [pickedPolicy.policyNumber, pickedPolicy.insuredObject, pickedPolicy.clientName, pickedPolicy.insurerName].filter((value): value is string => Boolean(value)) : []}
+        initialQuery={displayedPolicy?.policyNumber ?? ""}
+        suggestions={displayedPolicy ? [displayedPolicy.policyNumber, displayedPolicy.insuredObject, displayedPolicy.clientName, displayedPolicy.insurerName].filter((value): value is string => Boolean(value)) : []}
         searchScope={searchScope}
         onSelect={async (result) => {
           const nextPolicy = toSourcePolicy(result);
