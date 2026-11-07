@@ -396,7 +396,7 @@ export function PolicyForm({
                   setRenewedFromPolicyId(next);
                   setValue("renewedFromPolicyId", next, { shouldDirty: true, shouldValidate: true });
                 }}
-                selectedPolicy={renewalSource}
+                selectedPolicy={resolvedRenewalSource ?? renewalSource}
                 suggestions={renewalCandidates}
                 disabled={isPending}
                 allowClear
