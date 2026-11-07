@@ -8,6 +8,8 @@ export type PolicyRenewalSource = {
   clientName: string;
   insurerId: string;
   insurerName: string;
+  status?: string;
+  hasRenewal?: boolean;
   bonusSellerId?: string | null;
   policyType: PolicyFormValues["policyType"];
   startDate: Date;
