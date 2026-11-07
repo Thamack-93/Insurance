@@ -8,6 +8,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
+import { classifyCommissionDraftRows, type CommissionMatchCandidate } from "@/lib/commission-reconciliation.logic";
 
 export type CommissionDraftRow = { rowKey: string; policyNumber?: string; receiptNumber?: string; currency?: string; amount?: number; paymentDate?: string; sourcePage?: number; raw: Record<string, unknown>; warnings: string[] };
 
@@ -27,7 +28,7 @@ export function parseCommissionStatement(buffer: Buffer, mimeType: string): Comm
     const find = (keys: string[]) => keys.map((key) => raw[key] ?? raw[Object.keys(raw).find((candidate) => candidate.toLowerCase().includes(key)) ?? ""]).find((value) => text(value));
     const policyNumber = text(find(["policy", "póliza", "poliza"])) || undefined;
     const receiptNumber = text(find(["receipt", "recibo"])) || undefined;
-    const currency = text(find(["currency", "moneda"])) || undefined;
+    const currency = text(find(["currency", "moneda"])).toUpperCase() || undefined;
     const amount = money(find(["amount", "importe", "commission", "comisión"]));
     const paymentDate = date(find(["payment", "fecha"]));
     const warnings = [...(!policyNumber && !receiptNumber ? ["Falta identidad de póliza o recibo."] : []), ...(amount === undefined ? ["Importe no reconocido."] : []), ...(currency ? [] : ["Moneda no especificada."] )];
@@ -65,11 +66,19 @@ export async function createCommissionStatement(input: { fileName: string; mimeT
     const existing = await tx.commissionStatement.findUnique({ where: { organizationId_sourceHash: { organizationId: context.organizationId, sourceHash: hash } }, select: { id: true } });
     if (existing) throw new Error("COMMISSION_STATEMENT_DUPLICATE");
     const statement = await tx.commissionStatement.create({ data: { organizationId: context.organizationId, sourceFileName: input.fileName, mimeType: input.mimeType, sourceHash: hash, periodStart: input.periodStart, periodEnd: input.periodEnd, status: extractionError ? "EXTRACTION_FAILED" : "REVIEW", summaryJson: JSON.stringify({ rows: rows.length, warnings: rows.filter((row) => row.warnings.length).length, extractionError }), createdById: context.userId } });
+    const candidatesByRowKey = new Map<string, CommissionMatchCandidate[]>();
     for (const row of rows) {
-      const matches = await tx.commission.findMany({ where: { organizationId: context.organizationId, ...(row.receiptNumber ? { receipt: { receiptNumber: row.receiptNumber } } : {}), ...(row.policyNumber ? { policy: { policyNumber: row.policyNumber } } : {}) }, select: { id: true, receipt: { select: { currency: true } } }, take: 3 });
-      const compatible = row.currency ? matches.filter((match) => match.receipt?.currency === row.currency) : matches;
-      const status = compatible.length === 1 && row.amount !== undefined && row.warnings.length === 0 ? "MATCHED" : compatible.length > 1 ? "AMBIGUOUS" : "REVIEW";
-      await tx.commissionStatementRow.create({ data: { organizationId: context.organizationId, statementId: statement.id, sourceRowKey: row.rowKey, sourcePage: row.sourcePage, rawJson: JSON.stringify(row.raw), normalizedJson: JSON.stringify(row), policyNumber: row.policyNumber, receiptNumber: row.receiptNumber, currency: row.currency, amount: row.amount === undefined ? undefined : new Prisma.Decimal(row.amount), paymentDate: row.paymentDate ? new Date(row.paymentDate) : undefined, status, commissionId: status === "MATCHED" ? compatible[0].id : undefined, matchReason: status === "MATCHED" ? "Identidad y moneda únicas" : undefined, discrepancyReason: row.warnings.join(" ") || undefined } });
+      const matches = await tx.commission.findMany({
+        where: { organizationId: context.organizationId, ...(row.receiptNumber ? { receipt: { receiptNumber: row.receiptNumber } } : {}), ...(row.policyNumber ? { policy: { policyNumber: row.policyNumber } } : {}) },
+        select: { id: true, expectedAmount: true, receipt: { select: { currency: true } } },
+        take: 3,
+      });
+      candidatesByRowKey.set(row.rowKey, matches);
+    }
+    const decisions = classifyCommissionDraftRows(rows, candidatesByRowKey);
+    for (const [index, row] of rows.entries()) {
+      const decision = decisions[index];
+      await tx.commissionStatementRow.create({ data: { organizationId: context.organizationId, statementId: statement.id, sourceRowKey: row.rowKey, sourcePage: row.sourcePage, rawJson: JSON.stringify(row.raw), normalizedJson: JSON.stringify(row), policyNumber: row.policyNumber, receiptNumber: row.receiptNumber, currency: row.currency, amount: row.amount === undefined ? undefined : new Prisma.Decimal(row.amount), paymentDate: row.paymentDate ? new Date(row.paymentDate) : undefined, status: decision.status, commissionId: decision.commissionId, matchReason: decision.matchReason, discrepancyReason: decision.discrepancyReason } });
     }
     await writeActivityLog({ organizationId: context.organizationId, action: "CREATE_COMMISSION_STATEMENT", entityType: "CommissionStatement", entityId: statement.id, newValue: { sourceHash: hash, rows: rows.length, extractionError }, userId: context.userId, db: tx });
     return statement;
