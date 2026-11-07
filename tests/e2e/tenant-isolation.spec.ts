@@ -105,6 +105,12 @@ test("renewal detail does not load a source policy outside the agent portfolio o
     await page.getByRole("button", { name: "Iniciar sesión" }).click();
     await expect(page).toHaveURL(/\/today$/, { timeout: 30_000 });
 
+    await page.goto(`/renewals/${allowedSourceId}`);
+    await expect(page.getByRole("heading", { name: `Preparar renovación · ${allowedSourceId}` })).toBeVisible();
+    await page.goto(`/renewals/${privateSourceId}`);
+    await expect(page.getByRole("heading", { name: `Preparar renovación · ${privateSourceId}` })).toHaveCount(0);
+    await expect(page.getByText("Private renewal source client", { exact: true })).toHaveCount(0);
+
     await page.goto("/policies/tenant-policy-a");
     await expect(page.getByText("OVERLAP-A", { exact: false })).toBeVisible();
     const comparison = page.locator("details").filter({ hasText: "Comparar con póliza anterior" });

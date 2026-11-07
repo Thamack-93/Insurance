@@ -189,4 +189,81 @@ test.describe("Renewals Page (/renewals)", () => {
     await expect(page.getByText("Renueva a")).toBeVisible();
     await expect(page.getByText(policyNumber, { exact: true })).toBeVisible();
   });
+
+  test("prepares a selected renewal from read-only source records", async ({ page }) => {
+    const fixture = await seedPolicyFixture("RENEWAL-PREPARATION");
+    const db = getTestDb();
+    let successorId: string | null = null;
+    try {
+      const now = new Date();
+      const receiptBase = {
+        organizationId: TEST_ORGANIZATION_ID,
+        policyId: fixture.policyId,
+        clientId: fixture.clientId,
+        insurerId: fixture.insurerId,
+        periodStartDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+        periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+        dueDate: new Date(now.getTime() + 20 * 24 * 60 * 60 * 1000),
+        amount: 1200,
+        currency: "MXN",
+      };
+      await db.receipt.create({ data: { ...receiptBase, receiptNumber: `PREP-OPEN-${Date.now()}`, status: "PENDING" } });
+      await db.receipt.create({ data: { ...receiptBase, receiptNumber: `PREP-CANCELLED-${Date.now()}`, status: "CANCELLED", cancelledAt: now } });
+      await db.policyInsuredAsset.create({ data: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId, assetType: "AUTO", description: "Automóvil de preparación", serialNumber: "VIN-PREP-001", isPrimary: true } });
+      await db.policyInsuredParty.create({ data: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId, fullName: "Persona asegurada de prueba", isPrimary: true } });
+      await db.policy.update({ where: { id: fixture.policyId }, data: { riskDetailsReviewRequired: true, riskDetails: { vehicleUse: "Personal" } } });
+      const openTask = await db.workItem.create({ data: { organizationId: TEST_ORGANIZATION_ID, workItemType: "TASK", status: "OPEN", title: "Confirmar uso del vehículo", entityType: "Policy", entityId: fixture.policyId, clientId: fixture.clientId, policyId: fixture.policyId } });
+      await db.workItem.create({ data: { organizationId: TEST_ORGANIZATION_ID, workItemType: "TASK", status: "RESOLVED", title: "Tarea ya resuelta de prueba", entityType: "Policy", entityId: fixture.policyId, clientId: fixture.clientId, policyId: fixture.policyId } });
+      await db.document.create({ data: { organizationId: TEST_ORGANIZATION_ID, clientId: fixture.clientId, policyId: fixture.policyId, documentType: "POLICY", fileName: "poliza-preparacion.pdf", filePath: "test/poliza-preparacion.pdf", mimeType: "application/pdf" } });
+      const successor = await db.policy.create({ data: {
+        organizationId: TEST_ORGANIZATION_ID,
+        policyNumber: fixture.policyNumber,
+        clientId: fixture.clientId,
+        insurerId: fixture.insurerId,
+        policyType: "AUTO",
+        status: "ACTIVE",
+        paymentFrequency: "ANNUAL",
+        startDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+        endDate: new Date(now.getTime() + 395 * 24 * 60 * 60 * 1000),
+        premiumAmount: 1300,
+        currency: "MXN",
+        renewedFromPolicyId: fixture.policyId,
+      } });
+      successorId = successor.id;
+      await db.policyRenewalSuggestion.create({ data: { organizationId: TEST_ORGANIZATION_ID, sourcePolicyId: fixture.policyId, targetPolicyId: successor.id, status: "PENDING", reason: "Confirmar coincidencia de serie" } });
+
+      await authenticatePageAsAdmin(page);
+      await page.goto(`/renewals/${fixture.policyId}`);
+      await expect(page.getByRole("heading", { name: `Preparar renovación · ${fixture.policyNumber}` })).toBeVisible();
+      await expect(page.getByRole("link", { name: fixture.policyNumber }).first()).toHaveAttribute("href", `/policies/${fixture.policyId}`);
+      await expect(page.getByText("PREP-OPEN", { exact: false })).toBeVisible();
+      await expect(page.getByText("PREP-CANCELLED", { exact: false })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "Confirmar uso del vehículo" })).toHaveAttribute("href", `/tasks/${openTask.id}`);
+      await expect(page.getByText("Tarea ya resuelta de prueba", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("Automóvil de preparación", { exact: true })).toBeVisible();
+      await expect(page.getByText("Persona asegurada de prueba", { exact: false })).toBeVisible();
+      await expect(page.getByText("poliza-preparacion.pdf", { exact: true })).toBeVisible();
+      await expect(page.getByText("Revisar posible renovación por serie · " + fixture.policyNumber)).toBeVisible();
+      await expect(page.getByRole("link", { name: "Revisar los datos de riesgos de esta póliza" })).toBeVisible();
+      await expect(page.getByRole("link", { name: fixture.clientName })).toHaveAttribute("href", `/clients/${fixture.clientId}`);
+      await expect(page.getByText("Resumen de atención", { exact: true })).toBeVisible();
+
+      const source = await db.policy.findUniqueOrThrow({ where: { id: fixture.policyId }, select: { renewedFromPolicyId: true } });
+      const linkedRows = await db.policy.count({ where: { organizationId: TEST_ORGANIZATION_ID, renewedFromPolicyId: fixture.policyId } });
+      expect(source.renewedFromPolicyId).toBeNull();
+      expect(linkedRows).toBe(1);
+    } finally {
+      await db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT set_config('app.organization_id', ${TEST_ORGANIZATION_ID}, true)`;
+        await tx.policyRenewalSuggestion.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, sourcePolicyId: fixture.policyId } });
+        await tx.document.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+        await tx.workItem.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+        await tx.receipt.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+        if (successorId) await tx.policy.deleteMany({ where: { id: successorId, organizationId: TEST_ORGANIZATION_ID } });
+        await tx.policyInsuredAsset.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+        await tx.policyInsuredParty.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+      });
+      await cleanupPolicyFixture(fixture);
+    }
+  });
 });
