@@ -78,6 +78,7 @@ type RenewalPolicyRecord = {
   policyType: string;
   startDate: Date;
   endDate: Date;
+  updatedAt: Date;
   familyRootId: string | null;
   status: string;
 };
