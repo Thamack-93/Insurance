@@ -6,6 +6,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { upsertWorkItemFromSource } from "@/lib/work-items";
 import { createNotificationEvent } from "@/lib/notification-foundation";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
+import { isPaidWithinTolerance, PAYMENT_CLOSE_TOLERANCE } from "@/lib/receipt-reconciliation";
 
 export const COLLECTION_OUTCOMES = ["NO_ANSWER", "CONTACTED", "PROMISED_PAYMENT", "DISPUTED", "WRONG_CONTACT"] as const;
 export type CollectionOutcome = (typeof COLLECTION_OUTCOMES)[number];
@@ -123,7 +124,7 @@ export async function runCollectionFollowUpScan(organizationId: string, now = ne
     const run = await tx.maintenanceRun.create({ data: { organizationId, type: "COLLECTION_FOLLOWUP", status: "RUNNING", startedAt: now } });
     const items = await tx.workItem.findMany({
       where: { organizationId, sourceType: "Collection", status: { in: ["OPEN", "IN_PROGRESS", "WAITING_CLIENT"] } },
-      select: { id: true, sourceId: true, dueDate: true, assignedToId: true, receiptId: true, clientId: true, policyId: true, metadataJson: true, receipt: { select: { payments: { where: { status: "POSTED" }, select: { paidDate: true } } } } },
+      select: { id: true, sourceId: true, dueDate: true, assignedToId: true, receiptId: true, clientId: true, policyId: true, metadataJson: true, receipt: { select: { amount: true, payments: { where: { status: "POSTED" }, select: { amount: true, paidDate: true } } } } },
       orderBy: [{ dueDate: "asc" }, { id: "asc" }],
     });
     summary.scanned = items.length;
@@ -131,7 +132,12 @@ export async function runCollectionFollowUpScan(organizationId: string, now = ne
       const metadata = metadataFromWorkItem(item);
       const promised = typeof metadata.promisedPaymentDate === "string" ? new Date(metadata.promisedPaymentDate) : null;
       const due = item.dueDate && item.dueDate <= now;
-      const qualifyingPayment = promised && item.receipt?.payments.some((payment) => payment.paidDate <= promised);
+      const paidByPromise = promised && item.receipt
+        ? item.receipt.payments.reduce((total, payment) => payment.paidDate <= promised ? total + Number(payment.amount) : total, 0)
+        : 0;
+      const qualifyingPayment = promised && item.receipt
+        ? isPaidWithinTolerance(Number(item.receipt.amount), paidByPromise, PAYMENT_CLOSE_TOLERANCE)
+        : false;
       const brokenPromise = Boolean(promised && promised < now && metadata.outcome === "PROMISED_PAYMENT" && !qualifyingPayment);
       if (!due && !brokenPromise) continue;
       if (due) summary.due += 1;
