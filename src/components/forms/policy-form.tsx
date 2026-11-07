@@ -106,8 +106,7 @@ export function PolicyForm({
   const watchedRiskDetails = useWatch({ control, name: "riskDetails" });
   const watchedBonusEligibilityJson = useWatch({ control, name: "bonusEligibilityJson" });
   const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
-  const [verifiedRenewalSource, setVerifiedRenewalSource] = useState<PolicyRenewalSource | null>(renewalSource);
-  const [reviewSourceLoading, setReviewSourceLoading] = useState(false);
+  const [loadedRenewalSource, setLoadedRenewalSource] = useState<{ id: string; source: PolicyRenewalSource | null } | null>(null);
   const [reviewedFingerprint, setReviewedFingerprint] = useState<string | null>(null);
   const [renewalCandidateResult, setRenewalCandidateResult] = useState<{ key: string; candidates: SerialRenewalCandidate[] } | null>(null);
   const vehicles = selectedPolicyType === "AUTO" && watchedRiskDetails && typeof watchedRiskDetails === "object"
@@ -158,32 +157,24 @@ export function PolicyForm({
   );
 
   useEffect(() => {
-    if (!reviewRequired || !renewedFromPolicyId) {
-      setVerifiedRenewalSource(null);
-      setReviewSourceLoading(false);
-      return;
-    }
-    if (renewalSource?.id === renewedFromPolicyId && renewalSource.updatedAt) {
-      setVerifiedRenewalSource(renewalSource);
-      setReviewSourceLoading(false);
-      return;
-    }
-    if (!loadRenewalSource) {
-      setVerifiedRenewalSource(null);
-      setReviewSourceLoading(false);
-      return;
-    }
+    if (!reviewRequired || !renewedFromPolicyId
+      || (renewalSource?.id === renewedFromPolicyId && renewalSource.updatedAt)
+      || !loadRenewalSource) return;
     let cancelled = false;
-    setVerifiedRenewalSource(null);
-    setReviewSourceLoading(true);
     void loadRenewalSource(renewedFromPolicyId)
-      .then((source) => { if (!cancelled) setVerifiedRenewalSource(source); })
-      .catch(() => { if (!cancelled) setVerifiedRenewalSource(null); })
-      .finally(() => { if (!cancelled) setReviewSourceLoading(false); });
+      .then((source) => { if (!cancelled) setLoadedRenewalSource({ id: renewedFromPolicyId, source }); })
+      .catch(() => { if (!cancelled) setLoadedRenewalSource({ id: renewedFromPolicyId, source: null }); });
     return () => { cancelled = true; };
   }, [reviewRequired, renewedFromPolicyId, renewalSource, loadRenewalSource]);
 
-  const resolvedRenewalSource = verifiedRenewalSource?.id === renewedFromPolicyId ? verifiedRenewalSource : null;
+  const initialRenewalSource = renewalSource?.id === renewedFromPolicyId && renewalSource.updatedAt
+    ? renewalSource
+    : null;
+  const sourceLookupComplete = Boolean(initialRenewalSource || loadedRenewalSource?.id === renewedFromPolicyId || !loadRenewalSource);
+  const reviewSourceLoading = reviewRequired && !sourceLookupComplete;
+  const resolvedRenewalSource = reviewRequired
+    ? initialRenewalSource ?? (loadedRenewalSource?.id === renewedFromPolicyId ? loadedRenewalSource.source : null)
+    : null;
   const sourceVersion = resolvedRenewalSource?.updatedAt
     ? new Date(resolvedRenewalSource.updatedAt).toISOString()
     : null;
