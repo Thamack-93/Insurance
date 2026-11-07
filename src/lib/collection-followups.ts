@@ -158,7 +158,7 @@ export async function runCollectionFollowUpScan(organizationId: string, now = ne
         clientId: item.clientId,
         policyId: item.policyId,
         receiptId: item.receiptId,
-        dedupeKey: `collection-followup:${item.sourceId}:${stage}:${now.toISOString().slice(0, 10)}`,
+        dedupeKey: `collection-followup:${item.sourceId}:${stage}:${today}`,
       }, tx);
       if (event) {
         summary.notificationsCreated += 1;

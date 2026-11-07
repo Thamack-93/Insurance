@@ -111,6 +111,23 @@ describe("collection follow-up promise scan", () => {
     expect(mocks.createNotificationEvent).not.toHaveBeenCalled();
   });
 
+  it("deduplicates repeated reminders within the same business day", async () => {
+    const item = makeItem(1000, []);
+    item.dueDate = new Date("2026-10-08T12:00:00.000Z");
+    setup([item]);
+    mocks.createNotificationEvent.mockResolvedValueOnce({ status: "CREATED" }).mockResolvedValueOnce(null);
+
+    const first = await runCollectionFollowUpScan("org-1", new Date("2026-10-10T00:05:00.000Z"));
+    const second = await runCollectionFollowUpScan("org-1", new Date("2026-10-10T05:55:00.000Z"));
+
+    const firstDedupeKey = mocks.createNotificationEvent.mock.calls[0]?.[0].dedupeKey;
+    const secondDedupeKey = mocks.createNotificationEvent.mock.calls[1]?.[0].dedupeKey;
+    expect(firstDedupeKey).toBe("collection-followup:receipt:receipt-1:collection-followup:DUE_CONTACT:2026-10-09");
+    expect(secondDedupeKey).toBe(firstDedupeKey);
+    expect(first.notificationsCreated).toBe(1);
+    expect(second.notificationsCreated).toBe(0);
+  });
+
   it("uses the existing close tolerance and queries posted payments only", async () => {
     const tx = setup([makeItem(1000, [
       { amount: 997, paidDate: new Date("2026-10-08T12:00:00.000Z") },
