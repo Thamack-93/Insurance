@@ -7,4 +7,9 @@ describe("commission statement drafts", () => {
     expect(rows[0]).toMatchObject({ policyNumber: "A-1", receiptNumber: "R-1", currency: "MXN", amount: 1234.5, paymentDate: "2026-09-01T00:00:00.000Z", warnings: [] });
     expect(rows[1]?.warnings).toEqual(expect.arrayContaining(["Falta identidad de póliza o recibo.", "Moneda no especificada."]));
   });
+
+  it("normalizes imported currencies to uppercase", () => {
+    const rows = parseCommissionStatement(Buffer.from("Policy,Currency,Amount\nA-1,mxn,12.00\n"), "text/csv");
+    expect(rows[0]).toMatchObject({ policyNumber: "A-1", currency: "MXN", amount: 12 });
+  });
 });
