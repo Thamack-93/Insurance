@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -75,6 +75,10 @@ export function PolicyRenewalSelector({
 }: PolicyRenewalSelectorProps) {
   const [open, setOpen] = useState(false);
   const [pickedPolicy, setPickedPolicy] = useState<PolicyRenewalSource | null>(() => selectedPolicy ?? null);
+  // Replace search-result placeholder labels with the authorized source read.
+  useEffect(() => {
+    if (selectedPolicy?.id === value) setPickedPolicy(selectedPolicy);
+  }, [selectedPolicy, value]);
   const selectedLabel = pickedPolicy
     ? `${pickedPolicy.policyNumber} · ${pickedPolicy.clientName} · ${pickedPolicy.insurerName}`
     : null;
