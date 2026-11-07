@@ -461,6 +461,14 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     const nextRenewedFromPolicyId = normalized.renewedFromPolicyId;
     const previousRenewedFromPolicyId = previousPolicy.renewedFromPolicyId ?? null;
     const renewalChanged = previousRenewedFromPolicyId !== nextRenewedFromPolicyId;
+    const renewalIdentityChanged = previousPolicy.clientId !== normalized.clientId
+      || previousPolicy.insurerId !== normalized.insurerId
+      || previousPolicy.policyType !== normalized.policyType
+      || previousPolicy.startDate.getTime() !== normalized.startDate.getTime()
+      || previousPolicy.endDate.getTime() !== normalized.endDate.getTime();
+    // Leave existing historical links untouched for unrelated note/field edits.
+    // Revalidate predecessor compatibility whenever its identity or term changes.
+    const validateExistingLink = Boolean(nextRenewedFromPolicyId && (renewalChanged || renewalIdentityChanged));
     if (renewalChanged && nextRenewedFromPolicyId && (!parsed.data.renewalReviewConfirmed || !parsed.data.renewalSourceUpdatedAt)) {
       return errorResult("Confirma la revisión de la póliza anterior antes de cambiar el vínculo de renovación.");
     }
@@ -504,14 +512,14 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       if (renewalChanged && nextRenewalSource.updatedAt.toISOString() !== parsed.data.renewalSourceUpdatedAt) {
         return errorResult("La póliza anterior cambió. Vuelve a revisar sus datos antes de enlazarla.");
       }
-      const linkIssue = validateRenewalLink(nextRenewalSource, {
+      const linkIssue = validateExistingLink ? validateRenewalLink(nextRenewalSource, {
         id,
         clientId: normalized.clientId,
         insurerId: normalized.insurerId,
         policyType: normalized.policyType,
         startDate: normalized.startDate,
         endDate: normalized.endDate,
-      });
+      }) : null;
       if (linkIssue) return errorResult(linkIssue);
     }
 
@@ -528,13 +536,13 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           confirmedBonusSellerId = clientOwner?.portfolioOwnerId ?? null;
         }
       }
-      const currentRenewalSource = nextRenewalSource
+      const currentRenewalSource = validateExistingLink && nextRenewalSource
         ? await tx.policy.findFirst({
             where: { id: nextRenewalSource.id, organizationId: context.organizationId },
             select: { id: true, clientId: true, insurerId: true, policyType: true, startDate: true, endDate: true, updatedAt: true, familyRootId: true, status: true, renewals: { select: { id: true }, take: 1 } },
           })
         : null;
-      if (nextRenewalSource) {
+      if (validateExistingLink && nextRenewalSource) {
         if (!currentRenewalSource) throw new Error("La póliza origen ya no está disponible.");
         const linkIssue = validateRenewalLink(currentRenewalSource, {
           id,
