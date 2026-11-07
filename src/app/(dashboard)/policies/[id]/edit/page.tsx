@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { decodeRouteIdentifier } from "@/lib/route-identifier";
-import { updatePolicy } from "@/app/(dashboard)/policies/actions";
+import { updatePolicy, getPolicyRenewalReviewSource } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
@@ -137,6 +137,7 @@ export default async function EditPolicyPage({ params, searchParams }: { params:
               : null
           }
           showRenewalLink={isAdmin}
+          loadRenewalSource={getPolicyRenewalReviewSource}
           riskDetailsNeedsReview={policy.riskDetailsReviewRequired}
           submitAction={updatePolicy.bind(null, policy.id)}
         />

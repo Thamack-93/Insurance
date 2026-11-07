@@ -21,8 +21,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { closeRiskIssuesAction, linkRenewalSuggestionToPolicy, markRenewalSuggestionAsNotContinuing } from "@/app/(dashboard)/data-quality/actions";
 import { consolidateClientIntoTarget, updateClientQualityFields } from "@/app/(dashboard)/clients/actions";
-import { updatePolicyQualityFields } from "@/app/(dashboard)/policies/actions";
+import { getPolicyRenewalReviewSource, updatePolicyQualityFields } from "@/app/(dashboard)/policies/actions";
 import { linkRenewalToPolicy, markRenewalAsNotContinuing } from "@/app/(dashboard)/renewals/actions";
+import { RenewalLinkReviewDialog, type RenewalLinkReview } from "@/components/renewals/renewal-link-review-dialog";
 import type { GlobalSearchResult } from "@/lib/search";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { cn } from "@/lib/utils";
@@ -382,6 +383,7 @@ export function RenewalResolutionActions({
 }: RenewalResolutionActionsProps) {
   const { isPending, runMutation } = useMutationState();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [linkReview, setLinkReview] = useState<RenewalLinkReview | null>(null);
   const sourceLabel = `${sourcePolicyNumber} · ${clientName} · ${insurerName}`;
   const suggestions = useMemo(() => uniqueStrings([clientName]), [clientName]);
 
@@ -422,13 +424,38 @@ export function RenewalResolutionActions({
         initialQuery={clientName}
         suggestions={suggestions}
         onPick={async (result) => {
-          if (mode === "suggestion") {
-            if (!suggestionId) {
-              return { ok: false, error: "Falta la sugerencia de renovación." };
-            }
-            return linkRenewalSuggestionToPolicy(suggestionId, result.id);
+          if (mode === "suggestion" && !suggestionId) {
+            return { ok: false, error: "Falta la sugerencia de renovación." };
           }
-          return linkRenewalToPolicy(sourcePolicyId, result.id);
+          const [source, target] = await Promise.all([
+            getPolicyRenewalReviewSource(sourcePolicyId),
+            getPolicyRenewalReviewSource(result.id),
+          ]);
+          if (!source || !target) {
+            return { ok: false, error: "No se pudieron verificar las dos pólizas en tu cartera." };
+          }
+          setLinkReview({ source, target });
+          return { ok: true, id: target.id, redirectTo: "/data-quality", message: "Revisa ambas pólizas y confirma el vínculo." };
+        }}
+      />
+      <RenewalLinkReviewDialog
+        review={linkReview}
+        allowDifferentInsurer={mode === "suggestion"}
+        pending={isPending}
+        onOpenChange={(open) => { if (!open) setLinkReview(null); }}
+        onConfirm={(versions) => {
+          const action = mode === "suggestion" && suggestionId
+            ? linkRenewalSuggestionToPolicy(suggestionId, linkReview!.target.id, versions)
+            : linkRenewalToPolicy(sourcePolicyId, linkReview!.target.id, undefined, versions);
+          void runMutation(async () => {
+            const result = await action;
+            if (!result.ok) {
+              setLinkReview(null);
+            } else {
+              setLinkReview(null);
+            }
+            return result;
+          });
         }}
       />
     </div>

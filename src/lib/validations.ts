@@ -112,6 +112,8 @@ const policyBaseSchema = z
     beneficiaryInfo: optionalText,
     notes: optionalText,
     renewedFromPolicyId: z.string().trim().optional().or(z.literal("")),
+    renewalReviewConfirmed: z.boolean().optional(),
+    renewalSourceUpdatedAt: z.string().datetime().optional().or(z.literal("")),
   })
   .refine((values) => values.endDate >= values.startDate, {
     message: "La fecha final debe ser posterior al inicio.",

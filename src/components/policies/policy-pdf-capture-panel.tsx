@@ -42,7 +42,7 @@ import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/pol
 import { deletePolicyCaptureHandoffRemote, loadPolicyCaptureHandoff, persistPolicyCaptureHandoff, restorePolicyCaptureHandoff, savePolicyCaptureHandoff, clearPolicyCaptureHandoff } from "@/lib/nora-browser-session";
 import { PolicyPdfFilePicker } from "@/components/policies/policy-pdf-file-picker";
 import { PolicyRiskDetailsFields } from "@/components/forms/policy-risk-details-fields";
-import { emptyPolicyRiskDetails } from "@/lib/policy-risk-details";
+import { emptyPolicyRiskDetails, hasPolicyRiskData } from "@/lib/policy-risk-details";
 import type { PolicyType } from "@/lib/domain-values";
 
 type PreviewResponse = {
@@ -211,6 +211,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
   const [selectedInsurerLabel, setSelectedInsurerLabel] = useState("");
   const [selectedSourcePolicyId, setSelectedSourcePolicyId] = useState("");
   const [selectedSourcePolicyLabel, setSelectedSourcePolicyLabel] = useState("");
+  const [confirmedRiskSourceKey, setConfirmedRiskSourceKey] = useState<string | null>(null);
   const [showInlineClient, setShowInlineClient] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lookupOpen, setLookupOpen] = useState(false);
@@ -223,6 +224,14 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
   const [currentHandoffId, setCurrentHandoffId] = useState<string | null>(handoffId ?? null);
   const operationControllerRef = useRef<AbortController | null>(null);
   const file = files[0] ?? null;
+  const missingConfirmedRisk = draft ? !hasPolicyRiskData(draft.riskDetails) : false;
+  // Source + document context determines whether this specific reuse was confirmed.
+  // Changing the source, client, insurer or risk draft invalidates confirmation.
+  const riskSourceKey = JSON.stringify([
+    selectedSourcePolicyId, selectedClientId, selectedInsurerId, draft?.policyType,
+    draft?.riskDetails, draft?.startDate, draft?.endDate,
+  ]);
+  const carryForwardRiskConfirmed = confirmedRiskSourceKey === riskSourceKey;
 
   const receiptPlan = useMemo(
     () => (draft ? mergePolicyPdfCaptureReceiptPlan(draft, receiptPlanOverrides, preview?.receiptEvidence) : []),
@@ -682,8 +691,9 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
       setSelectedClientLabel(nextPreview.draft.clientName);
       setSelectedInsurerId(nextPreview.suggestions.insurerId ?? "");
       setSelectedInsurerLabel(nextPreview.draft.insurerName);
-      setSelectedSourcePolicyId(nextPreview.suggestions.sourcePolicyId ?? "");
-      setSelectedSourcePolicyLabel(nextPreview.suggestions.sourcePolicyId ? nextPreview.draft.sourcePolicyNumber ?? "" : "");
+      // AI suggestions must never silently become a confirmed renewal link.
+      setSelectedSourcePolicyId("");
+      setSelectedSourcePolicyLabel("");
       toast.success("La revisión IA terminó. Revisa las propuestas antes de confirmar.");
     } catch (reanalyzeError) {
       const message = reanalyzeError instanceof Error ? reanalyzeError.message : "La revisión IA no pudo completar este PDF.";
@@ -770,6 +780,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
           clientId: selectedClientId,
           insurerId: selectedInsurerId,
           sourcePolicyId: selectedSourcePolicyId || null,
+          carryForwardRiskConfirmed: Boolean(selectedSourcePolicyId && missingConfirmedRisk && carryForwardRiskConfirmed),
           receiptPlan: receiptPlan.map((item) => ({
             receiptNumber: item.receiptNumber,
             amount: item.amount,
@@ -1686,6 +1697,21 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                   <p className="mt-1 text-xs text-muted-foreground">
                     {selectedSourcePolicyId ? "Vínculo confirmado para esta captura." : "Las coincidencias son sugerencias; elige una para confirmar el vínculo."}
                   </p>
+                  {selectedSourcePolicyId && missingConfirmedRisk ? (
+                    <label className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50/30 p-3 text-sm dark:bg-amber-950/20">
+                      <input
+                        type="checkbox"
+                        checked={carryForwardRiskConfirmed}
+                        onChange={(event) => setConfirmedRiskSourceKey(event.target.checked ? riskSourceKey : null)}
+                        className="mt-0.5 size-4 shrink-0"
+                      />
+                      <span>
+                        El PDF no contiene todos los datos estructurados del riesgo.
+                        Confirmo que revisé la cobertura nueva y autorizo reutilizar los datos de riesgo de la póliza anterior.
+                        Si no marcas esta opción, esos datos no se copiarán automáticamente.
+                      </span>
+                    </label>
+                  ) : null}
                   {preview?.sourcePolicyOptions?.length ? (
                     <div className="mt-3 space-y-2">
                       {preview.sourcePolicyOptions.map((candidate) => (

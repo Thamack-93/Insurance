@@ -1654,12 +1654,9 @@ export default async function DataQualityPage({
                     />
                     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-sm text-muted-foreground">
-                        Aprobar selección vincula la renovación con su póliza destino y cierra el origen usando la lógica real de renovaciones.
+                        Para aprobar una renovación, usa su acción individual «Vincular renovación» y confirma la comparación de ambas pólizas.
                       </p>
                       <div className="ml-auto flex flex-wrap gap-2">
-                        <Button type="submit" name="operation" value="APPROVE">
-                          Aprobar selección
-                        </Button>
                         <Button type="submit" name="operation" value="DENY" variant="outline">
                           Denegar selección
                         </Button>

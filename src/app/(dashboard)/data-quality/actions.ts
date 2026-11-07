@@ -325,10 +325,7 @@ async function reviewRenewalSuggestion(
     }
 
     if (decision === "APPROVE") {
-      if (!suggestion.targetPolicy) {
-        return errorResult("Selecciona una póliza destino antes de aprobar la sugerencia.");
-      }
-      return linkRenewalToPolicy(suggestion.sourcePolicy.id, suggestion.targetPolicy.id);
+      return errorResult("Para aprobarla, usa «Vincular renovación» y confirma la comparación de las dos pólizas.");
     }
 
     const nextStatus = "DECLINED";
@@ -455,6 +452,7 @@ export async function closeRiskIssuesAction(input: {
 export async function linkRenewalSuggestionToPolicy(
   suggestionId: string,
   targetPolicyId: string,
+  reviewedVersions: { sourceUpdatedAt: string; targetUpdatedAt: string },
 ): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
@@ -469,7 +467,7 @@ export async function linkRenewalSuggestionToPolicy(
       return errorResult("Selecciona una póliza destino.");
     }
 
-    return linkRenewalToPolicy(suggestion.sourcePolicy.id, targetPolicyId);
+    return linkRenewalToPolicy(suggestion.sourcePolicy.id, targetPolicyId, suggestionId, reviewedVersions);
   } catch (error) {
     logError("data-quality.linkRenewalSuggestionToPolicy", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo vincular la sugerencia de renovación.");
@@ -894,33 +892,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
     }
 
     if (operation === "APPROVE") {
-      const missingTargetPolicy = suggestions.find((suggestion) => !suggestion.targetPolicyId);
-      if (missingTargetPolicy) {
-        throw new Error(`La sugerencia ${missingTargetPolicy.sourcePolicy.policyNumber} no tiene una póliza destino seleccionada.`);
-      }
-
-      for (const suggestion of suggestions) {
-        const result = await linkRenewalToPolicy(suggestion.sourcePolicyId, suggestion.targetPolicyId!, db);
-        if (!result.ok) {
-          throw new Error(result.error);
-        }
-      }
-
-      await writeActivityLog({
-        entityType: "PolicyRenewalSuggestion",
-        entityId: suggestions[0].id,
-        action: "RENEWAL_REVIEW_BULK_APPROVE",
-        oldValue: suggestions,
-        newValue: {
-          suggestionIds,
-          targetPolicyIds: suggestions.map((suggestion) => suggestion.targetPolicyId),
-        },
-        userId: actor.id,
-        organizationId: actor.organizationId,
-        db,
-      });
-      revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
-      return;
+      throw new Error("Revisa y vincula cada renovación desde su acción individual antes de aprobarla.");
     }
 
     if (operation === "MERGE") {
