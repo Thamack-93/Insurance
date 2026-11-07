@@ -160,9 +160,21 @@ test.describe("structured policy risk details", () => {
       await page.locator("#risk-AUTO-vehicles-0-make").fill("Honda");
       await page.locator("#risk-AUTO-vehicles-0-unitClass").selectOption("AUTO_PARTICULAR");
 
+      const review = page.getByRole("region", { name: "Revisar renovación antes de guardar" });
+      await expect(review).toContainText("Prima total");
+      await expect(review).toContainText("1500");
+      await expect(review).toContainText("Toyota");
+      await expect(review).toContainText("Honda");
+      const reviewConfirmation = review.getByRole("checkbox", { name: /Confirmo que revisé la póliza de origen/ });
+      await reviewConfirmation.check();
+      await page.locator("#premiumAmount").fill("1501");
+      await expect(reviewConfirmation).not.toBeChecked();
+      await page.locator("#premiumAmount").fill("1500");
+
       await page.getByRole("combobox", { name: "Vendedor para bonos", exact: true }).click();
       await page.getByRole("option", { name: "CI Admin", exact: true }).click();
       await page.locator("#policyNumber").fill(renewalNumber);
+      await reviewConfirmation.check();
       await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
       await expect(page).toHaveURL(/\/policies\/(?!new(?:[/?]|$))[^/]+$/);
       renewalId = new URL(page.url()).pathname.split("/").pop() ?? null;

@@ -58,6 +58,11 @@ test("creating a linked renewal closes both source follow-ups in the policy tran
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
     await selectBonusSeller(page);
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
+    await expect(page.getByRole("heading", { name: "Revisar renovación antes de guardar" })).toBeVisible();
+    await expect(page.getByText("Póliza de origen:", { exact: false })).toContainText(fixture.policyNumber);
+    const reviewConfirmation = page.getByRole("checkbox", { name: /Confirmo que revisé la póliza de origen/ });
+    await expect(reviewConfirmation).toBeVisible();
+    await reviewConfirmation.check();
     const action = await captureServerAction(page, () => page.getByRole("button", { name: "Crear póliza", exact: true }).click());
     console.log("Policy renewal server action:", action);
     await expect.poll(async () => {
@@ -142,6 +147,10 @@ test("a failed follow-up close rolls back linked policy creation and source rene
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
     await selectBonusSeller(page);
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
+    await expect(page.getByRole("heading", { name: "Revisar renovación antes de guardar" })).toBeVisible();
+    const reviewConfirmation = page.getByRole("checkbox", { name: /Confirmo que revisé la póliza de origen/ });
+    await expect(reviewConfirmation).toBeVisible();
+    await reviewConfirmation.check();
     const action = await captureServerAction(page, () => page.getByRole("button", { name: "Crear póliza", exact: true }).click());
     expect(action.status).toBeLessThan(500);
     await expect(page.locator("#main-content").getByText("E2E_RENEWAL_FOLLOWUP_CLOSE_FAILED")).toBeVisible();
@@ -171,5 +180,74 @@ test("a failed follow-up close rolls back linked policy creation and source rene
       await db.policy.delete({ where: { id: renewed.id } });
     }
     await cleanupPolicyFixture(fixture);
+  }
+});
+
+test("serial renewal suggestions require review before linking from the renewal board", async ({ page }) => {
+  const db = getTestDb();
+  const source = await seedPolicyFixture("POLICY-RENEWAL-SERIAL-REVIEW-SOURCE");
+  const target = await seedPolicyFixture("POLICY-RENEWAL-SERIAL-REVIEW-TARGET");
+  const serialNumber = "2T1BURHE0LC123456";
+  let suggestionId: string | null = null;
+
+  try {
+    const sourceEndDate = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
+    const targetStartDate = new Date(sourceEndDate);
+    targetStartDate.setDate(targetStartDate.getDate() + 1);
+    const targetEndDate = new Date(targetStartDate);
+    targetEndDate.setFullYear(targetEndDate.getFullYear() + 1);
+    await db.policy.update({ where: { id: source.policyId }, data: { endDate: sourceEndDate } });
+    await db.policy.update({
+      where: { id: target.policyId },
+      data: {
+        clientId: source.clientId,
+        startDate: targetStartDate,
+        endDate: targetEndDate,
+        insuredObject: "Honda Civic 2021",
+        status: "PENDING",
+      },
+    });
+    await db.policyInsuredAsset.createMany({
+      data: [source, target].map((fixture) => ({
+        organizationId: TEST_ORGANIZATION_ID,
+        policyId: fixture.policyId,
+        assetType: "AUTO",
+        description: "Vehículo sintético para renovación E2E",
+        serialNumber,
+        isPrimary: true,
+      })),
+    });
+    const suggestion = await db.policyRenewalSuggestion.create({
+      data: {
+        organizationId: TEST_ORGANIZATION_ID,
+        sourcePolicyId: source.policyId,
+        targetPolicyId: target.policyId,
+        status: "PENDING",
+        confidence: 0.99,
+        reason: "Misma serie/VIN y cliente; vigencias consecutivas.",
+      },
+      select: { id: true },
+    });
+    suggestionId = suggestion.id;
+
+    await authenticatePageAsAdmin(page);
+    await page.goto("/operations?view=renewals");
+    const sourceCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: source.policyNumber });
+    await expect(sourceCard).toBeVisible();
+    await sourceCard.getByRole("button", { name: "Vincular como renovación" }).click();
+
+    const review = page.getByRole("dialog", { name: "Verificar vínculo de renovación" });
+    await expect(review).toContainText(source.policyNumber);
+    await expect(review).toContainText(target.policyNumber);
+    const confirmButton = review.getByRole("button", { name: "Confirmar vínculo" });
+    await expect(confirmButton).toBeDisabled();
+    await review.getByRole("checkbox").check();
+    await confirmButton.click();
+
+    await expect.poll(async () => (await db.policy.findUnique({ where: { id: target.policyId } }))?.renewedFromPolicyId)
+      .toBe(source.policyId);
+  } finally {
+    if (suggestionId) await db.policyRenewalSuggestion.deleteMany({ where: { id: suggestionId } });
+    await Promise.all([cleanupPolicyFixture(source), cleanupPolicyFixture(target)]);
   }
 });

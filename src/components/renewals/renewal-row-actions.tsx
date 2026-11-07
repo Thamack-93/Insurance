@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { NoRenewalButton } from "@/components/renewals/no-renewal-button";
 import { PolicySearchDialog } from "@/components/policies/policy-search-dialog";
+import { getPolicyRenewalReviewSource } from "@/app/(dashboard)/policies/actions";
+import { RenewalLinkReviewDialog, type RenewalLinkReview } from "@/components/renewals/renewal-link-review-dialog";
 import { linkRenewalToPolicy } from "@/app/(dashboard)/renewals/actions";
 import type { GlobalSearchResult } from "@/lib/search";
 
@@ -27,6 +29,7 @@ export function RenewalRowActions({
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [linkReview, setLinkReview] = useState<RenewalLinkReview | null>(null);
 
   const sourceLabel = `${sourcePolicyNumber} · ${clientName} · ${insurerName}`;
   const suggestions = useMemo(
@@ -37,15 +40,34 @@ export function RenewalRowActions({
   async function handleSelect(result: GlobalSearchResult) {
     try {
       setIsPending(true);
-      const mutation = await linkRenewalToPolicy(sourcePolicyId, result.id);
-      if (!mutation.ok) {
-        toast.error(mutation.error);
+      const [source, target] = await Promise.all([
+        getPolicyRenewalReviewSource(sourcePolicyId),
+        getPolicyRenewalReviewSource(result.id),
+      ]);
+      if (!source || !target) {
+        toast.error("No se pudieron verificar las dos pólizas en tu cartera.");
         return false;
       }
-
-      toast.success(mutation.message);
-      router.refresh();
+      setLinkReview({ source, target });
       return true;
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function confirmLink(versions: { sourceUpdatedAt: string; targetUpdatedAt: string }) {
+    if (!linkReview) return;
+    try {
+      setIsPending(true);
+      const mutation = await linkRenewalToPolicy(sourcePolicyId, linkReview.target.id, undefined, versions);
+      if (!mutation.ok) {
+        toast.error(mutation.error);
+        setLinkReview(null);
+        return;
+      }
+      toast.success(mutation.message);
+      setLinkReview(null);
+      router.refresh();
     } finally {
       setIsPending(false);
     }
@@ -89,6 +111,12 @@ export function RenewalRowActions({
         initialQuery={`${clientName} ${insurerName}`}
         suggestions={suggestions}
         onSelect={handleSelect}
+      />
+      <RenewalLinkReviewDialog
+        review={linkReview}
+        pending={isPending}
+        onOpenChange={(open) => { if (!open) setLinkReview(null); }}
+        onConfirm={confirmLink}
       />
     </div>
   );

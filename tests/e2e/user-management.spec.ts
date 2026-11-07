@@ -22,14 +22,19 @@ test.describe("administración de usuarios", () => {
     const replacement = await db.user.create({
       data: { email: replacementEmail, name: "Delete Replacement", passwordHash: hashTestPassword("delete-replacement-123"), role: "AGENT", active: true },
     });
-    await db.organizationMembership.createMany({
-      data: [target, replacement].map((user) => ({
-        organizationId: TEST_ORGANIZATION_ID,
-        userId: user.id,
-        role: "AGENT",
-        active: user.id === target.id ? false : true,
-      })),
-    });
+    for (const user of [target, replacement]) {
+      await db.organizationMembership.upsert({
+        where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: user.id } },
+        update: { role: "AGENT", active: user.id !== target.id },
+        create: {
+          id: `om_${user.id}`,
+          organizationId: TEST_ORGANIZATION_ID,
+          userId: user.id,
+          role: "AGENT",
+          active: user.id !== target.id,
+        },
+      });
+    }
     let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | undefined;
 
     try {

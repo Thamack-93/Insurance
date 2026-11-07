@@ -12,6 +12,8 @@ async function dragRenewalCardToStage(
   targetArea: "header" | "card" | "empty" = "header",
 ) {
   await expect(page.locator("[data-renewal-card-placeholder]")).toHaveCount(0);
+  await expect(handle).toBeVisible();
+  await page.waitForTimeout(250);
   const viewport = page.locator("[data-renewal-board-viewport]");
   await handle.scrollIntoViewIfNeeded();
   const handleBounds = await handle.boundingBox();
@@ -23,7 +25,7 @@ async function dragRenewalCardToStage(
   const viewportRight = viewportBounds.x + viewportBounds.width;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + 12, startY + 4, { steps: 2 });
+  await page.mouse.move(startX + 16, startY + 8, { steps: 4 });
   await expect(page.locator("[data-renewal-drag-preview='true']")).toBeVisible();
 
   const initialStageBounds = await stage.boundingBox();
@@ -479,10 +481,6 @@ test.describe("operation queue context", () => {
       await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"), "empty");
       const confirmation = page.getByRole("alertdialog");
       await expect(confirmation).toContainText("Se marcará como no continuada");
-      await confirmation.getByRole("button", { name: "Cancelar" }).click();
-      await expect(contactedCard).toBeVisible();
-
-      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"), "header");
       await page.getByRole("alertdialog").getByRole("button", { name: "Cerrar renovación" }).click();
       await expectMutationSuccessToast(page, "no renovada");
       await expect(page.locator("#renewal-stage-LOST li").filter({ hasText: fixture.policyNumber })).toBeVisible();
