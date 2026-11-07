@@ -16,7 +16,8 @@ import { TableToolbar } from "@/components/tables/table-toolbar";
 import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { formatDate, today } from "@/lib/dates";
-import { businessStartOfMonth } from "@/lib/business-dates";
+import { businessEndOfMonth, businessStartOfMonth, formatBusinessDateInput } from "@/lib/business-dates";
+import { buildHistoricalCollections } from "@/lib/historical-collections";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
@@ -59,9 +60,11 @@ export default async function ReceiptsPage({
   const scope = await requireOrganizationPortfolioReadScopeOrRedirect();
   const now = today();
   const monthStart = businessStartOfMonth(now);
-  const previousMonthCutoff = subMonths(now, 1);
-  const previousMonthStart = businessStartOfMonth(previousMonthCutoff);
-  const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 6));
+  const historicalMonths = Array.from({ length: 6 }, (_, index) => {
+    const start = businessStartOfMonth(subMonths(monthStart, index + 1));
+    const cutoff = businessEndOfMonth(start);
+    return { month: formatBusinessDateInput(start).slice(0, 7), start, cutoff };
+  }).reverse();
   const clearFiltersHref = buildTableHref("/receipts", params, {
     q: null,
     status: null,
@@ -83,7 +86,7 @@ export default async function ReceiptsPage({
   const pageDataPromise = withTenantOrganization(scope.organizationId, async (db) => {
     const organizationKind = await db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } });
     const core = await loadReceiptPageCore(db, scope.organizationId, { baseWhere, where, now, orderBy, page });
-    const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, monthlyDueReceiptCountsResult, previousMonthDueReceiptCountsResult, ytdDueReceiptCountsResult, paymentHistoryResult, reviewIssuesResult] =
+    const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, historicalReceiptsResult, paymentHistoryResult, reviewIssuesResult] =
       await settleReceiptReadsSequentially([
         () => db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
         () => resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
@@ -93,20 +96,22 @@ export default async function ReceiptsPage({
           include: { client: true, policy: true, insurer: true, endorsement: true },
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
         }),
-        () => db.receipt.groupBy({
-          by: ["status"],
-          where: { ...scopedReceiptWhere, dueDate: { gte: monthStart, lte: now } },
-          _count: { _all: true },
-        }),
-        () => db.receipt.groupBy({
-          by: ["status"],
-          where: { ...scopedReceiptWhere, dueDate: { gte: previousMonthStart, lte: previousMonthCutoff } },
-          _count: { _all: true },
-        }),
-        () => db.receipt.groupBy({
-          by: ["status"],
-          where: { ...scopedReceiptWhere, dueDate: { gte: yearStart, lte: now } },
-          _count: { _all: true },
+        () => db.receipt.findMany({
+          where: {
+            ...scopedReceiptWhere,
+            dueDate: { gte: historicalMonths[0]?.start, lt: monthStart },
+          },
+          select: {
+            id: true,
+            dueDate: true,
+            createdAt: true,
+            updatedAt: true,
+            amount: true,
+            currency: true,
+            status: true,
+            cancelledAt: true,
+            payments: { select: { amount: true, paidDate: true, createdAt: true, status: true, reversedAt: true } },
+          },
         }),
         () => db.payment.findMany({
           relationLoadStrategy: "join",
@@ -137,9 +142,7 @@ export default async function ReceiptsPage({
       agentContactResult,
       qualitasCapabilityResult,
       paidThisMonthResult,
-      monthlyDueReceiptCountsResult,
-      previousMonthDueReceiptCountsResult,
-      ytdDueReceiptCountsResult,
+      historicalReceiptsResult,
       paymentHistoryResult,
       reviewIssuesResult,
     };
@@ -151,7 +154,7 @@ export default async function ReceiptsPage({
     logError("receipts.page.data", error, { organizationId: scope.organizationId });
     throw error;
   }
-  const { organizationKind, core, agentContactResult, qualitasCapabilityResult, paidThisMonthResult, monthlyDueReceiptCountsResult, previousMonthDueReceiptCountsResult, ytdDueReceiptCountsResult, paymentHistoryResult, reviewIssuesResult } = pageData;
+  const { organizationKind, core, agentContactResult, qualitasCapabilityResult, paidThisMonthResult, historicalReceiptsResult, paymentHistoryResult, reviewIssuesResult } = pageData;
 
   const reportAuxiliaryFailure = (group: string) => (reason: unknown) => {
     logError(`receipts.page.${group}`, reason, { organizationId: scope.organizationId });
@@ -160,13 +163,10 @@ export default async function ReceiptsPage({
   const qualitasCapability = resolveReceiptAuxiliary(qualitasCapabilityResult, null, reportAuxiliaryFailure("qualitas-capability"));
   const qualitasMonitorFeatureEnabled = isQualitasReceiptMonitorEnabled() && Boolean(qualitasCapability?.enabled);
   const paidThisMonth = resolveReceiptAuxiliary(paidThisMonthResult, [], reportAuxiliaryFailure("paid-this-month"));
-  const monthlyDueReceiptCounts = resolveReceiptAuxiliary(monthlyDueReceiptCountsResult, [], reportAuxiliaryFailure("monthly-due-receipts"));
-  const previousMonthDueReceiptCounts = resolveReceiptAuxiliary(previousMonthDueReceiptCountsResult, [], reportAuxiliaryFailure("previous-month-due-receipts"));
-  const ytdDueReceiptCounts = resolveReceiptAuxiliary(ytdDueReceiptCountsResult, [], reportAuxiliaryFailure("ytd-due-receipts"));
+  const historicalReceipts = resolveReceiptAuxiliary(historicalReceiptsResult, [], reportAuxiliaryFailure("historical-collections"));
   const paymentHistory = resolveReceiptAuxiliary(paymentHistoryResult, [], reportAuxiliaryFailure("payment-history"));
   const reviewIssues = resolveReceiptAuxiliary(reviewIssuesResult, [], reportAuxiliaryFailure("review-issues"));
   const {
-    openCount,
     overdueCount,
     outstandingAgg,
     overdueAgg,
@@ -178,13 +178,11 @@ export default async function ReceiptsPage({
   const outstandingAmount = toNumber(outstandingAgg._sum.amount);
   const overdueAmount = toNumber(overdueAgg._sum.amount);
   const paidAmountMonth = paidThisMonth.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
-  const monthCollection = receiptCollectionSnapshot(monthlyDueReceiptCounts);
-  const previousMonthCollection = receiptCollectionSnapshot(previousMonthDueReceiptCounts);
-  const ytdCollection = receiptCollectionSnapshot(ytdDueReceiptCounts);
-  const collectionRateDeltaLabel = monthCollection.rate !== null && previousMonthCollection.rate !== null
-    ? `${monthCollection.rate > previousMonthCollection.rate ? "+" : ""}${monthCollection.rate - previousMonthCollection.rate} pp`
-    : "s/d";
-  const formatCollectionRate = (rate: number | null) => rate === null ? "s/d" : `${rate}%`;
+  const historicalCollection = buildHistoricalCollections(historicalReceipts.map((receipt) => ({
+    ...receipt,
+    amount: toNumber(receipt.amount),
+    payments: receipt.payments.map((payment) => ({ ...payment, amount: toNumber(payment.amount) })),
+  })), historicalMonths);
 
   const collectableRows: CollectableReceipt[] = pagedReceipts
     .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
@@ -248,7 +246,7 @@ export default async function ReceiptsPage({
         }
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
         <MetricCard
           title="Saldo pendiente"
           value={formatCurrency(outstandingAmount)}
@@ -270,20 +268,33 @@ export default async function ReceiptsPage({
           icon={BadgeCheck}
           tone="blue"
         />
-        <MetricCard
-          title="Cobro del mes"
-          value={formatCollectionRate(monthCollection.rate)}
-          description={(
-            <>
-              <span className="block">Mes actual a hoy: {monthCollection.paid}/{monthCollection.total}</span>
-              <span className="block">Mismo corte mes anterior: {formatCollectionRate(previousMonthCollection.rate)} ({collectionRateDeltaLabel})</span>
-              <span className="block">YTD a hoy: {formatCollectionRate(ytdCollection.rate)} ({ytdCollection.paid}/{ytdCollection.total})</span>
-            </>
-          )}
-          icon={ReceiptText}
-          tone="amber"
-        />
       </section>
+
+      <SectionCard
+        title="Cobranza histórica por vencimiento"
+        description="Cohortes por mes de vencimiento, reconstruidas al cierre del mes en horario de negocio (UTC−6). Los importes se muestran por moneda."
+      >
+        {historicalCollection.length === 0 ? (
+          <p className="px-5 py-6 text-sm text-muted-foreground">Aún no hay recibos para los últimos seis meses cerrados.</p>
+        ) : (
+          <Table>
+            <TableHeader><TableRow><TableHead>Vencimiento</TableHead><TableHead>Moneda</TableHead><TableHead className="text-right">Recibos</TableHead><TableHead className="text-right">Importe vencido</TableHead><TableHead className="text-right">Cobrado al corte</TableHead><TableHead className="text-right">Saldo al corte</TableHead><TableHead>Calidad</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {historicalCollection.flatMap((month) => month.currencies.map((currency) => (
+                <TableRow key={`${month.month}-${currency.currency}`}>
+                  <TableCell className="font-medium">{month.month}</TableCell>
+                  <TableCell>{currency.currency}</TableCell>
+                  <TableCell className="text-right">{currency.receipts}</TableCell>
+                  <TableCell className="text-right">{currency.dueAmount === null ? "—" : formatCurrency(currency.dueAmount, currency.currency)}</TableCell>
+                  <TableCell className="text-right">{currency.collectedAmount === null ? "—" : formatCurrency(currency.collectedAmount, currency.currency)}</TableCell>
+                  <TableCell className="text-right">{currency.outstandingAmount === null ? "—" : formatCurrency(currency.outstandingAmount, currency.currency)}</TableCell>
+                  <TableCell>{currency.incompleteReceipts === 0 ? "Completa" : `Incompleta · ${currency.incompleteReceipts} recibos sin evidencia suficiente`}</TableCell>
+                </TableRow>
+              ))) }
+            </TableBody>
+          </Table>
+        )}
+      </SectionCard>
 
       <UrlTabs defaultValue={initialTab}>
         <TabsList className="rounded-md bg-muted p-1">
@@ -664,7 +675,6 @@ export default async function ReceiptsPage({
     </div>
   );
 }
-
 async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: {
   baseWhere: Prisma.ReceiptWhereInput;
   where: Prisma.ReceiptWhereInput;
@@ -694,12 +704,4 @@ async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: 
         take: PAGE_SIZE,
       });
   return { openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts };
-}
-
-function receiptCollectionSnapshot(counts: Array<{ status: string; _count: { _all: number } }>) {
-  const paid = counts.find(({ status }) => status === "PAID")?._count._all ?? 0;
-  const total = counts
-    .filter(({ status }) => status !== "CANCELLED")
-    .reduce((sum, { _count }) => sum + _count._all, 0);
-  return { paid, total, rate: total > 0 ? Math.round((paid / total) * 100) : null };
 }
