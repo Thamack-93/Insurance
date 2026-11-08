@@ -190,7 +190,7 @@ export default async function ReceiptsPage({
   const safePaymentHistory = paymentHistory.filter((payment) => payment.receipt && payment.client && payment.policy);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <SavedQueueControls route="receipts" config={{ route: "receipts", search: query ?? "", filters: { status: statusFilter ?? "", tab: initialTab }, sort: sortKey ?? "", dateWindow: "30d", version: 1 }} />
       <PageHeader
         eyebrow="Finanzas"
@@ -238,87 +238,86 @@ export default async function ReceiptsPage({
         />
       </section>
 
-      <UrlTabs defaultValue={initialTab}>
-        <TabsList className="rounded-md bg-muted p-1">
-          <TabsTrigger value="cobrar" className="rounded-md px-4">
-            Por cobrar
-          </TabsTrigger>
-          <TabsTrigger value="historico" className="rounded-md px-4">
-            Pagos
-          </TabsTrigger>
-          {scope.role === "ADMIN" ? (
-            <TabsTrigger value="revision" className="rounded-md px-4">
-              Revisión
+      <UrlTabs defaultValue={initialTab} className="gap-0">
+        <div className={`flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between ${initialTab === "cobrar" ? "rounded-t-xl border border-b-0 border-border/70 bg-card px-4 py-2" : ""}`}>
+          <TabsList className="rounded-md bg-muted p-1">
+            <TabsTrigger value="cobrar" className="rounded-md px-4">
+              Por cobrar
             </TabsTrigger>
+            <TabsTrigger value="historico" className="rounded-md px-4">
+              Pagos
+            </TabsTrigger>
+            {scope.role === "ADMIN" ? (
+              <TabsTrigger value="revision" className="rounded-md px-4">
+                Revisión
+              </TabsTrigger>
+            ) : null}
+          </TabsList>
+          {initialTab === "cobrar" ? (
+            <TableToolbar
+              className="grid w-full min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center"
+              searchPlaceholder="Buscar recibos"
+              resultCount={filteredCount}
+              totalCount={totalOpenCount}
+              resultNoun={["recibo", "recibos"]}
+              exportDataset="receipts"
+              filters={[{
+                key: "status",
+                label: "Vencimiento",
+                options: [
+                  { label: "Vencidos", value: "overdue" },
+                  { label: "Vencen hoy", value: "today" },
+                  { label: "Próximos 7 días", value: "upcoming" },
+                ],
+              }]}
+              tableControls={false}
+            />
           ) : null}
-        </TabsList>
+        </div>
 
-        <TabsContent value="cobrar" className="space-y-4">
-          <SectionCard
-            title="Por cobrar"
-            compactHeader
-            action={(
-              <TableToolbar
-                className="grid w-full min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center"
-                searchPlaceholder="Buscar recibos"
-                resultCount={filteredCount}
-                totalCount={totalOpenCount}
-                resultNoun={["recibo", "recibos"]}
-                exportDataset="receipts"
-                filters={[{
-                  key: "status",
-                  label: "Vencimiento",
-                  options: [
-                    { label: "Vencidos", value: "overdue" },
-                    { label: "Vencen hoy", value: "today" },
-                    { label: "Próximos 7 días", value: "upcoming" },
-                  ],
-                }]}
-                tableControls={false}
-              />
-            )}
-          >
-            {filteredCount === 0 ? (
-              <TableEmptyState
-                icon={isFiltered ? ReceiptText : BadgeCheck}
-                isFiltered={isFiltered}
-                clearHref={clearFiltersHref}
-                noun="recibos abiertos"
-                query={query}
-                emptyTitle="¡Cartera al día!"
-                emptyDescription="No hay recibos abiertos por cobrar."
-                emptyAction={{ label: "Nuevo recibo", href: "/receipts/new" }}
-              />
-            ) : pagedReceipts.length === 0 ? (
-              <div className="p-4">
+        <TabsContent value="cobrar" className="mt-0">
+          <div className="rounded-b-xl border-x border-b border-border/70 bg-card">
+            <div className="px-3 py-3">
+              {filteredCount === 0 ? (
+                <TableEmptyState
+                  icon={isFiltered ? ReceiptText : BadgeCheck}
+                  isFiltered={isFiltered}
+                  clearHref={clearFiltersHref}
+                  noun="recibos abiertos"
+                  query={query}
+                  emptyTitle="¡Cartera al día!"
+                  emptyDescription="No hay recibos abiertos por cobrar."
+                  emptyAction={{ label: "Nuevo recibo", href: "/receipts/new" }}
+                />
+              ) : pagedReceipts.length === 0 ? (
                 <EmptyState
                   icon={ReceiptText}
                   title="Página fuera de rango"
                   description="No hay recibos en esta página. Vuelve al inicio del listado."
                   action={{ label: "Volver al inicio", href: buildTableHref("/receipts", params, { tab: "cobrar", q: query || null, sort: sortKey ?? null, dir: direction ?? null, }) }}
                 />
-              </div>
-            ) : (
-              <div className="px-3 py-3">
-                <CollectableReceipts
-                  receipts={collectableRows}
-                  returnTo={returnTo}
-                  isDemo={organizationKind?.kind === "DEMO"}
-                  qualitasMonitorFeatureEnabled={qualitasMonitorFeatureEnabled}
-                />
-                <Pagination
-                  page={page}
-                  pageSize={PAGE_SIZE}
-                  total={filteredCount}
-                  basePath="/receipts"
-                  searchParams={{ tab: "cobrar", q: query, status: statusFilter, sort: sortKey ?? undefined, dir: direction ?? undefined }}
-                />
-              </div>
-            )}
-          </SectionCard>
+              ) : (
+                <>
+                  <CollectableReceipts
+                    receipts={collectableRows}
+                    returnTo={returnTo}
+                    isDemo={organizationKind?.kind === "DEMO"}
+                    qualitasMonitorFeatureEnabled={qualitasMonitorFeatureEnabled}
+                  />
+                  <Pagination
+                    page={page}
+                    pageSize={PAGE_SIZE}
+                    total={filteredCount}
+                    basePath="/receipts"
+                    searchParams={{ tab: "cobrar", q: query, status: statusFilter, sort: sortKey ?? undefined, dir: direction ?? undefined }}
+                  />
+                </>
+              )}
+            </div>
+          </div>
         </TabsContent>
 
-        <TabsContent value="historico" className="space-y-6">
+        <TabsContent value="historico" className="mt-4 space-y-6">
           <SectionCard
             title="Pagos registrados"
             description="Últimos 50 pagos conciliados con su recibo origen."
