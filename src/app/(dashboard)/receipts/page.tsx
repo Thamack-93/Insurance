@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { subMonths } from "date-fns";
 import { ArrowRight, BadgeCheck, CircleDollarSign, Plus, ReceiptText, ShieldAlert } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
@@ -16,8 +15,7 @@ import { TableToolbar } from "@/components/tables/table-toolbar";
 import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { formatDate, today } from "@/lib/dates";
-import { businessEndOfMonth, businessStartOfMonth, formatBusinessDateInput } from "@/lib/business-dates";
-import { buildHistoricalCollections } from "@/lib/historical-collections";
+import { businessStartOfMonth } from "@/lib/business-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
@@ -60,11 +58,6 @@ export default async function ReceiptsPage({
   const scope = await requireOrganizationPortfolioReadScopeOrRedirect();
   const now = today();
   const monthStart = businessStartOfMonth(now);
-  const historicalMonths = Array.from({ length: 6 }, (_, index) => {
-    const start = businessStartOfMonth(subMonths(monthStart, index + 1));
-    const cutoff = businessEndOfMonth(start);
-    return { month: formatBusinessDateInput(start).slice(0, 7), start, cutoff };
-  }).reverse();
   const clearFiltersHref = buildTableHref("/receipts", params, {
     q: null,
     status: null,
@@ -86,7 +79,7 @@ export default async function ReceiptsPage({
   const pageDataPromise = withTenantOrganization(scope.organizationId, async (db) => {
     const organizationKind = await db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } });
     const core = await loadReceiptPageCore(db, scope.organizationId, { baseWhere, where, now, orderBy, page });
-    const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, historicalReceiptsResult, paymentHistoryResult, reviewIssuesResult] =
+    const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult] =
       await settleReceiptReadsSequentially([
         () => db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
         () => resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
@@ -95,23 +88,6 @@ export default async function ReceiptsPage({
           where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
           include: { client: true, policy: true, insurer: true, endorsement: true },
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
-        }),
-        () => db.receipt.findMany({
-          where: {
-            ...scopedReceiptWhere,
-            dueDate: { gte: historicalMonths[0]?.start, lt: monthStart },
-          },
-          select: {
-            id: true,
-            dueDate: true,
-            createdAt: true,
-            updatedAt: true,
-            amount: true,
-            currency: true,
-            status: true,
-            cancelledAt: true,
-            payments: { select: { amount: true, paidDate: true, createdAt: true, status: true, reversedAt: true } },
-          },
         }),
         () => db.payment.findMany({
           relationLoadStrategy: "join",
@@ -142,7 +118,6 @@ export default async function ReceiptsPage({
       agentContactResult,
       qualitasCapabilityResult,
       paidThisMonthResult,
-      historicalReceiptsResult,
       paymentHistoryResult,
       reviewIssuesResult,
     };
@@ -154,7 +129,7 @@ export default async function ReceiptsPage({
     logError("receipts.page.data", error, { organizationId: scope.organizationId });
     throw error;
   }
-  const { organizationKind, core, agentContactResult, qualitasCapabilityResult, paidThisMonthResult, historicalReceiptsResult, paymentHistoryResult, reviewIssuesResult } = pageData;
+  const { organizationKind, core, agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult } = pageData;
 
   const reportAuxiliaryFailure = (group: string) => (reason: unknown) => {
     logError(`receipts.page.${group}`, reason, { organizationId: scope.organizationId });
@@ -163,7 +138,6 @@ export default async function ReceiptsPage({
   const qualitasCapability = resolveReceiptAuxiliary(qualitasCapabilityResult, null, reportAuxiliaryFailure("qualitas-capability"));
   const qualitasMonitorFeatureEnabled = isQualitasReceiptMonitorEnabled() && Boolean(qualitasCapability?.enabled);
   const paidThisMonth = resolveReceiptAuxiliary(paidThisMonthResult, [], reportAuxiliaryFailure("paid-this-month"));
-  const historicalReceipts = resolveReceiptAuxiliary(historicalReceiptsResult, [], reportAuxiliaryFailure("historical-collections"));
   const paymentHistory = resolveReceiptAuxiliary(paymentHistoryResult, [], reportAuxiliaryFailure("payment-history"));
   const reviewIssues = resolveReceiptAuxiliary(reviewIssuesResult, [], reportAuxiliaryFailure("review-issues"));
   const {
@@ -178,12 +152,6 @@ export default async function ReceiptsPage({
   const outstandingAmount = toNumber(outstandingAgg._sum.amount);
   const overdueAmount = toNumber(overdueAgg._sum.amount);
   const paidAmountMonth = paidThisMonth.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
-  const historicalCollection = buildHistoricalCollections(historicalReceipts.map((receipt) => ({
-    ...receipt,
-    amount: toNumber(receipt.amount),
-    payments: receipt.payments.map((payment) => ({ ...payment, amount: toNumber(payment.amount) })),
-  })), historicalMonths);
-
   const collectableRows: CollectableReceipt[] = pagedReceipts
     .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
     .map((receipt) => ({
@@ -269,32 +237,6 @@ export default async function ReceiptsPage({
           tone="blue"
         />
       </section>
-
-      <SectionCard
-        title="Cobranza histórica por vencimiento"
-        description="Cohortes por mes de vencimiento, reconstruidas al cierre del mes en horario de negocio (UTC−6). Los importes se muestran por moneda."
-      >
-        {historicalCollection.length === 0 ? (
-          <p className="px-5 py-6 text-sm text-muted-foreground">Aún no hay recibos para los últimos seis meses cerrados.</p>
-        ) : (
-          <Table>
-            <TableHeader><TableRow><TableHead>Vencimiento</TableHead><TableHead>Moneda</TableHead><TableHead className="text-right">Recibos</TableHead><TableHead className="text-right">Importe vencido</TableHead><TableHead className="text-right">Cobrado al corte</TableHead><TableHead className="text-right">Saldo al corte</TableHead><TableHead>Calidad</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {historicalCollection.flatMap((month) => month.currencies.map((currency) => (
-                <TableRow key={`${month.month}-${currency.currency}`}>
-                  <TableCell className="font-medium">{month.month}</TableCell>
-                  <TableCell>{currency.currency}</TableCell>
-                  <TableCell className="text-right">{currency.receipts}</TableCell>
-                  <TableCell className="text-right">{currency.dueAmount === null ? "—" : formatCurrency(currency.dueAmount, currency.currency)}</TableCell>
-                  <TableCell className="text-right">{currency.collectedAmount === null ? "—" : formatCurrency(currency.collectedAmount, currency.currency)}</TableCell>
-                  <TableCell className="text-right">{currency.outstandingAmount === null ? "—" : formatCurrency(currency.outstandingAmount, currency.currency)}</TableCell>
-                  <TableCell>{currency.incompleteReceipts === 0 ? "Completa" : `Incompleta · ${currency.incompleteReceipts} recibos sin evidencia suficiente`}</TableCell>
-                </TableRow>
-              ))) }
-            </TableBody>
-          </Table>
-        )}
-      </SectionCard>
 
       <UrlTabs defaultValue={initialTab}>
         <TabsList className="rounded-md bg-muted p-1">
