@@ -50,22 +50,24 @@ export function SectionCard({
   action,
   children,
   className,
+  compactHeader = false,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  compactHeader?: boolean;
 }) {
   return (
-    <Card className={cn("bg-card shadow-none", className)}>
-      <CardHeader className="border-b border-border/70 pb-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+    <Card className={cn("bg-card shadow-none", compactHeader && "gap-0 py-0", className)}>
+      <CardHeader className={cn("border-b border-border/70 pb-4", compactHeader && "px-4 py-3 pb-3 xl:flex xl:flex-row xl:items-center xl:gap-4")}>
+        <div className={cn("flex items-start justify-between gap-3", compactHeader && "w-full flex-col gap-3 xl:flex-row xl:items-center xl:gap-6")}>
+          <div className={cn(compactHeader && "shrink-0")}>
             <CardTitle>{title}</CardTitle>
             {description ? <CardDescription className="mt-1">{description}</CardDescription> : null}
           </div>
-          {action ? <div className="shrink-0">{action}</div> : null}
+          {action ? <div className={compactHeader ? "min-w-0 xl:flex-1" : "shrink-0"}>{action}</div> : null}
         </div>
       </CardHeader>
       <CardContent className="p-0">{children}</CardContent>
