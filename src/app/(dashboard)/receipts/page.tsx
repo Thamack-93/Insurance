@@ -256,11 +256,10 @@ export default async function ReceiptsPage({
         <TabsContent value="cobrar" className="space-y-4">
           <SectionCard
             title="Por cobrar"
-            description="Búsqueda y paginación sobre todos los recibos abiertos."
-          >
-            <div className="border-b border-border/70 bg-muted/20 px-4 py-3">
+            compactHeader
+            action={(
               <TableToolbar
-                className="grid w-full grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+                className="grid w-full min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center"
                 searchPlaceholder="Buscar recibos"
                 resultCount={filteredCount}
                 totalCount={totalOpenCount}
@@ -277,7 +276,8 @@ export default async function ReceiptsPage({
                 }]}
                 tableControls={false}
               />
-            </div>
+            )}
+          >
             {filteredCount === 0 ? (
               <TableEmptyState
                 icon={isFiltered ? ReceiptText : BadgeCheck}
