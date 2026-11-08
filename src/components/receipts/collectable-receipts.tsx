@@ -108,10 +108,11 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
           variant="ghost"
           size="sm"
           className="h-8 gap-2 text-xs text-muted-foreground"
+          aria-label={`Seleccionar ${allIds.length} recibo${allIds.length === 1 ? "" : "s"} sin pago${allIds.length === 1 ? "" : "s"} de esta página`}
           onClick={() => selectAll(allIds)}
           disabled={allIds.length === 0}
         >
-          Seleccionar los {allIds.length} recibos sin pagos de esta página
+          Seleccionar sin pagos ({allIds.length})
         </Button>
       </div>
     );
