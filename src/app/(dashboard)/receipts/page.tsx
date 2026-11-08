@@ -257,9 +257,11 @@ export default async function ReceiptsPage({
           <SectionCard
             title="Por cobrar"
             description="Búsqueda y paginación sobre todos los recibos abiertos."
-            action={(
+          >
+            <div className="border-b border-border/70 bg-muted/20 px-4 py-3">
               <TableToolbar
-                searchPlaceholder="Buscar por número, cliente, póliza, monto o vencimiento..."
+                className="grid w-full grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+                searchPlaceholder="Buscar recibos"
                 resultCount={filteredCount}
                 totalCount={totalOpenCount}
                 resultNoun={["recibo", "recibos"]}
@@ -275,8 +277,7 @@ export default async function ReceiptsPage({
                 }]}
                 tableControls={false}
               />
-            )}
-          >
+            </div>
             {filteredCount === 0 ? (
               <TableEmptyState
                 icon={isFiltered ? ReceiptText : BadgeCheck}
