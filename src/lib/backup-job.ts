@@ -47,6 +47,7 @@ export async function runBackupJob(options: { force?: boolean; now?: Date } = {}
         scope: "PLATFORM",
         now,
         target: buildScheduledPlatformBackupTarget(now),
+        operationSource: "backups.scheduled.create",
       });
       global = { status: "created", backup: backup.filename, pathname: backup.pathname };
     }
@@ -81,6 +82,7 @@ export async function runBackupJob(options: { force?: boolean; now?: Date } = {}
         organizationId: organization.id,
         now,
         target: buildScheduledOrganizationBackupTarget(organization.id, now),
+        operationSource: "backups.scheduled.create",
       });
       organizationResults.push({ organizationId: organization.id, status: "created", backup: backup.filename, pathname: backup.pathname });
     } catch (error) {

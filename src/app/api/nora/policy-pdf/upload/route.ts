@@ -11,6 +11,8 @@ import {
   isNoraPolicyPdfPathname,
 } from "@/lib/nora-pdf-storage.shared";
 import { DEMO_UPLOAD_MAX_BYTES } from "@/lib/demo-upload-validation";
+import { BlobOperationBudgetExceededError, multipartAdvancedOperationCount, recordBlobAdvancedOperation } from "@/lib/blob-operations";
+import { registerNoraTemporaryBlob, recordCompletedNoraPolicyPdfUpload } from "@/lib/nora-temporary-blob-ledger";
 
 export const runtime = "nodejs";
 
@@ -32,6 +34,33 @@ function uploadErrorResponse(error: unknown) {
 
 export async function POST(request: NextRequest) {
   try {
+    const body = await readJsonBody<Parameters<typeof handleUpload>[0]["body"]>(request.clone(), 16 * 1024);
+
+    // Vercel sends this signed callback after the client upload. The SDK checks
+    // its signature before invoking onUploadCompleted, so it does not need a
+    // browser session cookie or same-origin header.
+    if (body?.type === "blob.upload-completed") {
+      const result = await handleUpload({
+        request,
+        body,
+        onBeforeGenerateToken: async () => { throw new Error("UNEXPECTED_UPLOAD_TOKEN_REQUEST"); },
+        onUploadCompleted: async ({ blob, tokenPayload }) => {
+          let callback: { organizationId?: unknown; userId?: unknown };
+          try { callback = JSON.parse(tokenPayload ?? "{}"); } catch { return; }
+          if (typeof callback.organizationId !== "string" || typeof callback.userId !== "string") return;
+          const uploadedAt = new Date();
+          await recordCompletedNoraPolicyPdfUpload({
+            organizationId: callback.organizationId,
+            userId: callback.userId,
+            pathname: blob.pathname,
+            uploadedAt,
+            expiresAt: new Date(uploadedAt.getTime() + 60 * 60 * 1000),
+          });
+        },
+      });
+      return NextResponse.json(result);
+    }
+
     if (process.env.PLATFORM_UPLOADS_ENABLED?.trim() === "0") {
       return NextResponse.json({ error: "Las subidas están deshabilitadas temporalmente por la plataforma." }, { status: 501 });
     }
@@ -62,7 +91,6 @@ export async function POST(request: NextRequest) {
     });
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
-    const body = await readJsonBody<Parameters<typeof handleUpload>[0]["body"]>(request, 16 * 1024);
     if (!body || typeof body !== "object") {
       return NextResponse.json({ error: "El payload de subida no es válido." }, { status: 400 });
     }
@@ -70,24 +98,60 @@ export async function POST(request: NextRequest) {
     const result = await handleUpload({
       request,
       body,
-      onBeforeGenerateToken: async (pathname) => {
+      onBeforeGenerateToken: async (pathname, _clientPayload, multipart) => {
         if (!isNoraPolicyPdfPathname(pathname, user.id, organization.organizationId)) {
           throw new Error("La ruta temporal del PDF no es válida.");
         }
+
+        const issuedAt = new Date();
+        const expiresAt = new Date(issuedAt.getTime() + 30 * 60 * 1000 + 60 * 60 * 1000);
+        await recordBlobAdvancedOperation({
+          source: "nora.pdf.upload",
+          operation: multipart ? "multipart_put" : "put",
+          advancedOperations: multipart ? multipartAdvancedOperationCount(NORA_POLICY_PDF_MAX_BYTES) : 1,
+        });
+        await registerNoraTemporaryBlob({
+          context: organization,
+          userId: user.id,
+          pathname,
+          kind: "POLICY_PDF",
+          uploadedAt: null,
+          expiresAt,
+        });
 
         return {
           allowedContentTypes: ["application/pdf"],
           maximumSizeInBytes: demoUpload ? DEMO_UPLOAD_MAX_BYTES : NORA_POLICY_PDF_MAX_BYTES,
           validUntil: Date.now() + 30 * 60 * 1000,
-          addRandomSuffix: true,
+          tokenPayload: JSON.stringify({ organizationId: organization.organizationId, userId: user.id }),
+          // The requested pathname already contains a random UUID; keeping it
+          // stable lets the signed completion callback update the exact ledger
+          // row created before the client upload.
+          addRandomSuffix: false,
           allowOverwrite: false,
           cacheControlMaxAge: 0,
         };
+      },
+      onUploadCompleted: async ({ blob, tokenPayload }) => {
+        let callback: { organizationId?: unknown; userId?: unknown };
+        try { callback = JSON.parse(tokenPayload ?? "{}"); } catch { return; }
+        if (typeof callback.organizationId !== "string" || typeof callback.userId !== "string") return;
+        const uploadedAt = new Date();
+        await recordCompletedNoraPolicyPdfUpload({
+          organizationId: callback.organizationId,
+          userId: callback.userId,
+          pathname: blob.pathname,
+          uploadedAt,
+          expiresAt: new Date(uploadedAt.getTime() + 60 * 60 * 1000),
+        });
       },
     });
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof BlobOperationBudgetExceededError) {
+      return NextResponse.json({ error: "El límite temporal de almacenamiento se alcanzó. Inténtalo después del reinicio del presupuesto.", code: "BLOB_OPERATION_BUDGET_EXCEEDED" }, { status: 429 });
+    }
     if (error instanceof RequestGuardError) return guardErrorResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

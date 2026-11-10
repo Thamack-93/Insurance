@@ -8,6 +8,11 @@ const list = vi.hoisted(() => vi.fn());
 const put = vi.hoisted(() => vi.fn());
 
 vi.mock("@vercel/blob", () => ({ del, get, list, put }));
+vi.mock("@/lib/blob-operations", () => ({
+  trackedBlobPut: ({ pathname, body, options }: { pathname: string; body: Buffer | string; options?: unknown }) => put(pathname, body, options),
+  trackedBlobList: (_source: string, options: unknown) => list(options),
+  multipartAdvancedOperationCount: (size: number) => Math.ceil(size / (8 * 1024 * 1024)) + 2,
+}));
 
 import {
   createBackupManifest,

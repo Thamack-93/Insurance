@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/blob-operations", () => ({
+  trackedBlobPut: vi.fn(),
+  trackedBlobList: vi.fn(),
+  trackedBlobCopy: vi.fn(),
+  multipartAdvancedOperationCount: (size: number) => Math.ceil(size / (8 * 1024 * 1024)) + 2,
+}));
+
 import {
   createBackupManifest,
   decryptBackupPayload,

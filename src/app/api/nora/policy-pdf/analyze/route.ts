@@ -11,9 +11,7 @@ import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import { buildPolicyPdfCapturePreviewFromText, buildPolicyPdfCapturePreviewFromDraft } from "@/lib/policy-pdf-capture-preview";
 import { extractPolicyPdfDraftFromAiFile } from "@/lib/assistant-ai";
 import { OperationTimeoutError, withOperationTimeout } from "@/lib/operation-timeout";
-import {
-  cleanupExpiredNoraPolicyPdfUploads,
-} from "@/lib/nora-pdf-storage";
+import { markNoraTemporaryBlobDeleted, registerNoraTemporaryBlob } from "@/lib/nora-temporary-blob-ledger";
 import { isNoraPolicyPdfPathname, NORA_POLICY_PDF_MAX_BYTES } from "@/lib/nora-pdf-storage.shared";
 import {
   recordSecurityAccessDenied,
@@ -167,6 +165,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "La carátula temporal ya no está disponible." }, { status: 404 });
     }
 
+    const uploadedAt = new Date(blob.blob.uploadedAt);
+    const expiresAt = new Date(uploadedAt.getTime() + 60 * 60 * 1000);
+    if (expiresAt.getTime() <= Date.now()) {
+      await del(blobUrl).then(() => markNoraTemporaryBlobDeleted({ context: tenantContext, userId: user.id, pathname: blobPath })).catch(() => {});
+      return NextResponse.json({ error: "La carátula temporal expiró." }, { status: 404 });
+    }
+    await registerNoraTemporaryBlob({ context: tenantContext, userId: user.id, pathname: blobPath, kind: "POLICY_PDF", uploadedAt, expiresAt });
+
     if ((blob.blob?.size ?? 0) > (demoUpload ? DEMO_UPLOAD_MAX_BYTES : NORA_POLICY_PDF_MAX_BYTES)) {
       return NextResponse.json({ error: "El PDF temporal supera el tamaño permitido." }, { status: 413 });
     }
@@ -184,7 +190,7 @@ export async function POST(request: NextRequest) {
     // uploads receive the same structural safety boundary without reset state.
     const validation = await validateDemoPdf(new File([bytes.buffer as ArrayBuffer], payload.fileName ?? "policy.pdf", { type: "application/pdf" }));
     if (!validation.ok) {
-      await del(blobUrl).catch(() => {});
+      await del(blobUrl).then(() => markNoraTemporaryBlobDeleted({ context: tenantContext, userId: user.id, pathname: blobPath })).catch(() => {});
       return NextResponse.json({ error: validation.message, code: validation.code }, { status: 422 });
     }
 
@@ -229,7 +235,7 @@ export async function POST(request: NextRequest) {
           });
         });
       } catch (error) {
-        await del(blobUrl).catch(() => {});
+        await del(blobUrl).then(() => markNoraTemporaryBlobDeleted({ context: tenantContext, userId: user.id, pathname: blobPath })).catch(() => {});
         logError("api.nora.policyPdf.analyze.demoArtifact", error);
         return NextResponse.json({ error: "No se pudo registrar la retención segura del PDF DEMO." }, { status: 503 });
       }
@@ -294,7 +300,9 @@ export async function POST(request: NextRequest) {
       }
     } finally {
       if (!payload.retainBlob) {
-        await del(blobUrl).catch(() => {});
+        await del(blobUrl).then(() => markNoraTemporaryBlobDeleted({ context: tenantContext, userId: user.id, pathname: blobPath })).catch((error) => {
+          logError("api.nora.policyPdf.analyze.markTemporaryBlobDeleted", error);
+        });
         // Keep the retention ledger truthful when a temporary Nora PDF is
         // intentionally deleted at the end of analysis rather than waiting
         // for the 48-hour retention worker to discover a missing object.
@@ -305,9 +313,6 @@ export async function POST(request: NextRequest) {
           })).catch((error) => logError("api.nora.policyPdf.analyze.markPurged", error));
         }
       }
-      await cleanupExpiredNoraPolicyPdfUploads(user.id, organizationId).catch((error) => {
-        logError("api.nora.policyPdf.analyze.cleanup", error);
-      });
     }
 
     return NextResponse.json({ success: true, analysisSource, provenance: preview?.provenance, preview, pdfReference: payload.retainBlob ? { url: blobUrl, fileName: payload.fileName ?? "policy.pdf", expiresAt: Date.now() + 30 * 60 * 1000 } : null });

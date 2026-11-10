@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { del, list } from "@vercel/blob";
+import { del } from "@vercel/blob";
+import { trackedBlobList } from "@/lib/blob-operations";
 import { Prisma } from "@/generated/prisma/client";
 import { AuthError, hashPassword, requireSuperAdmin } from "@/lib/auth";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
@@ -368,7 +369,7 @@ async function purgeDemoPrivateBlobs(organizationId: string, renewLock?: () => P
   for (const prefix of demoBlobPrefixes(organizationId)) {
     let cursor: string | undefined;
     do {
-      const page = await list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+      const page = await trackedBlobList("demo.organization.maintenance", { prefix, limit: 1000, ...(cursor ? { cursor } : {}) }, "MAINTENANCE");
       if (page.blobs.length > 0) {
         await Promise.all(page.blobs.map((blob) => del(blob.url)));
         purged += page.blobs.length;
