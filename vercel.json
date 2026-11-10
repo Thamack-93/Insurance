@@ -35,7 +35,7 @@
     },
     {
       "path": "/api/jobs/nora-blob-cleanup",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 4 * * *"
     }
   ]
 }
