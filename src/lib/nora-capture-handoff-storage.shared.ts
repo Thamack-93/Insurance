@@ -6,6 +6,12 @@ function safeSegment(value: string) {
   return value.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 96) || "unknown";
 }
 
+export function isNoraCaptureHandoffPathnameForOrganization(pathname: string, organizationId: string) {
+  const prefix = `${NORA_CAPTURE_HANDOFF_PREFIX}/${safeSegment(organizationId)}/`;
+  const segments = pathname.split("/");
+  return pathname.startsWith(prefix) && segments.length === 5 && segments[4]?.endsWith(".json");
+}
+
 /**
  * Organization-aware handoff paths. The optional third argument preserves the
  * legacy helper contract for callers that only handle non-tenant temporary

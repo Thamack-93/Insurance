@@ -45,6 +45,7 @@ export type CreateAndCatalogBackupInput = {
   now?: Date;
   target?: BackupTarget;
   emergency?: boolean;
+  operationSource?: "backups.scheduled.create" | "backups.manual.create";
   /** Preserve existing shared Blob objects during an isolated certification drill. */
   skipPrune?: boolean;
 };
@@ -214,8 +215,8 @@ export async function createAndCatalogBackup(input: CreateAndCatalogBackupInput)
   await deleteStoredBackup(target.pathname).catch(() => undefined);
   try {
     const backup = input.scope === "PLATFORM"
-      ? await createDatabaseBackup(now, { target, deferRotation: true, emergency: input.emergency })
-      : await createOrganizationDatabaseBackup(input.organizationId!, now, { target, deferRotation: true });
+      ? await createDatabaseBackup(now, { target, deferRotation: true, emergency: input.emergency, operationSource: input.operationSource })
+      : await createOrganizationDatabaseBackup(input.organizationId!, now, { target, deferRotation: true, operationSource: input.operationSource });
     const verification = await verifyAfterUpload({
       filename: target.filename,
       pathname: target.pathname,

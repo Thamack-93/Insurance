@@ -185,6 +185,7 @@ model Organization {
   currencyRates               CurrencyRate[]
   demoState                   DemoOrganizationState?
   demoUploadArtifacts         DemoUploadArtifact[]
+  noraTemporaryBlobs          NoraTemporaryBlob[]
   commissionStatementRows     CommissionStatementRow[]
 
   @@index([status])
@@ -287,6 +288,7 @@ model User {
   sessions                            Session[]
   userPreferences                     UserPreference[]
   demoUploadArtifacts                 DemoUploadArtifact[]
+  noraTemporaryBlobs                  NoraTemporaryBlob[]
 
   @@index([email])
   @@index([role])
@@ -1226,6 +1228,42 @@ model DemoUploadArtifact {
   @@index([organizationId, purgeAfterAt, status])
   @@index([userId, uploadedAt])
   @@index([organizationId, validationStatus, status])
+}
+
+/// Organization/user-scoped cleanup ledger for Nora's temporary PDF and handoff Blobs.
+model NoraTemporaryBlob {
+  id             String    @id @default(cuid())
+  organizationId String?
+  userId         String?
+  pathname       String    @unique
+  kind           String
+  uploadedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, expiresAt])
+  @@index([userId, expiresAt])
+}
+
+/// Aggregated application-side Blob advanced-operation counts, with no tenant or user data.
+model BlobOperationUsage {
+  id                 String   @id @default(cuid())
+  periodKind         String
+  periodStart        DateTime @db.Date
+  category           String
+  source             String
+  operation          String
+  advancedOperations Int      @default(0)
+  updatedAt          DateTime @updatedAt
+
+  @@unique([periodKind, periodStart, category, source, operation])
+  @@index([periodKind, periodStart, category])
+  @@index([periodStart, source])
 }
 
 /// Singleton platform write-mode switch used during the short cutover/reset

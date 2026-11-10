@@ -29,3 +29,9 @@ export function isNoraPolicyPdfPathname(pathname: string, userId: string, organi
     : `${NORA_POLICY_PDF_PREFIX}/`;
   return pathname.startsWith(prefix) && pathname.includes(`/${userSegment}/`) && pathname.toLowerCase().endsWith(".pdf");
 }
+
+export function isNoraPolicyPdfPathnameForOrganization(pathname: string, organizationId: string) {
+  const prefix = `${NORA_POLICY_PDF_PREFIX}/${sanitizeSegment(organizationId)}/`;
+  const segments = pathname.split("/");
+  return pathname.startsWith(prefix) && segments.length === 5 && segments[4]?.toLowerCase().endsWith(".pdf");
+}

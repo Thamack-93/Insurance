@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { del, put } from "@vercel/blob";
+import { del } from "@vercel/blob";
 import { AuthError } from "@/lib/auth";
 import { requireOrganizationContext, type OrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
@@ -16,6 +16,7 @@ import { z } from "zod";
 import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { DEMO_UPLOAD_MAX_BYTES, validateDemoPdf } from "@/lib/demo-upload-validation";
 import { demoUploadRetentionDeadline } from "@/lib/demo-retention";
+import { BlobOperationBudgetExceededError, trackedBlobPut } from "@/lib/blob-operations";
 
 const uploadSchema = z.object({
   clientId: z.string().optional(),
@@ -94,12 +95,17 @@ async function processFile(
     }
     // Keep customer names out of object paths. The random opaque key also
     // prevents overwrite/replay; the display filename remains tenant metadata.
-    const blob = await put(`${organizationNamespace}/documents/${randomUUID()}`, Buffer.from(bytes), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: false,
-      contentType: detectedType,
-      cacheControlMaxAge: 0,
+    const blob = await trackedBlobPut({
+      source: "documents.upload",
+      pathname: `${organizationNamespace}/documents/${randomUUID()}`,
+      body: Buffer.from(bytes),
+      options: {
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        contentType: detectedType,
+        cacheControlMaxAge: 0,
+      },
     });
     const storagePath = `blob:${blob.url}`;
     uploadedBlobUrl = blob.url;
@@ -137,6 +143,9 @@ async function processFile(
     // A database/metadata failure after put() must not leave an untracked
     // private object that a DEMO reset or retention worker cannot find.
     if (uploadedBlobUrl) await del(uploadedBlobUrl).catch(() => undefined);
+    if (error instanceof BlobOperationBudgetExceededError) {
+      return { ok: false, fileName: file.name, error: "Se alcanzó el límite mensual o diario de almacenamiento. Inténtalo después del reinicio del presupuesto." };
+    }
     logError("api.documents.upload.file", error);
     return { ok: false, fileName: file.name, error: "No se pudo guardar el archivo." };
   }

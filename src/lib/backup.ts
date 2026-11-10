@@ -1,7 +1,8 @@
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import { createGzip } from "node:zlib";
-import { del, get, list, put } from "@vercel/blob";
+import { del, get, type ListBlobResultBlob } from "@vercel/blob";
+import { multipartAdvancedOperationCount, trackedBlobList, trackedBlobPut, type BlobOperationSource } from "@/lib/blob-operations";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import {
   BACKUP_AUTH_TAG_BYTES,
@@ -539,19 +540,19 @@ async function* encryptedBackupStream(
   yield authTag;
 }
 
-async function listAllBackupBlobs(prefix: string) {
-  const blobs: Awaited<ReturnType<typeof list>>["blobs"] = [];
+async function listAllBackupBlobs(prefix: string, source: BlobOperationSource = "backups.dashboard.list", category: "INTERACTIVE" | "CRITICAL" = "INTERACTIVE") {
+  const blobs: ListBlobResultBlob[] = [];
   let cursor: string | undefined;
   do {
-    const page = await list({ prefix, limit: 1000, cursor });
+    const page = await trackedBlobList(source, { prefix, limit: 1000, cursor }, category);
     blobs.push(...page.blobs);
     cursor = page.hasMore ? page.cursor : undefined;
   } while (cursor);
   return blobs;
 }
 
-async function listBackupsInPrefix(prefix: string): Promise<BackupEntry[]> {
-  const blobs = await listAllBackupBlobs(prefix);
+async function listBackupsInPrefix(prefix: string, source: BlobOperationSource = "backups.dashboard.list", category: "INTERACTIVE" | "CRITICAL" = "INTERACTIVE"): Promise<BackupEntry[]> {
+  const blobs = await listAllBackupBlobs(prefix, source, category);
   const pathnames = new Set(blobs.map((blob) => blob.pathname));
   return blobs
     .filter((blob) => blob.pathname.endsWith(BACKUP_EXTENSION))
@@ -590,10 +591,10 @@ function assertSafeOrganizationId(organizationId: string) {
   return organizationId;
 }
 
-async function listTenantBackupsInPrefix(prefix: string, organizationId: string): Promise<BackupEntry[]> {
+async function listTenantBackupsInPrefix(prefix: string, organizationId: string, source: BlobOperationSource = "backups.dashboard.list", category: "INTERACTIVE" | "CRITICAL" = "INTERACTIVE"): Promise<BackupEntry[]> {
   const safeOrganizationId = assertSafeOrganizationId(organizationId);
   const tenantPrefix = `${prefix}${safeOrganizationId}/`;
-  const blobs = await listAllBackupBlobs(tenantPrefix);
+  const blobs = await listAllBackupBlobs(tenantPrefix, source, category);
   const pathnames = new Set(blobs.map((blob) => blob.pathname));
   return blobs
     .filter((blob) => blob.pathname.endsWith(BACKUP_EXTENSION))
@@ -620,7 +621,7 @@ export function listOrganizationBackups(organizationId: string): Promise<BackupE
 }
 
 export async function rotateBackups(options: { retentionDays?: number } = {}) {
-  const entries = await listBackups();
+  const entries = await listBackupsInPrefix(BACKUP_PREFIX, "backups.rotation.list", "CRITICAL");
   const selection = selectBackupRetention(
     entries.map((entry) => ({ ...entry, id: entry.pathname })),
   );
@@ -641,7 +642,7 @@ export async function rotateBackups(options: { retentionDays?: number } = {}) {
 
 export async function createDatabaseBackup(
   now = new Date(),
-  options: { emergency?: boolean; retentionDays?: number; target?: BackupTarget; deferRotation?: boolean } = {},
+  options: { emergency?: boolean; retentionDays?: number; target?: BackupTarget; deferRotation?: boolean; operationSource?: "backups.scheduled.create" | "backups.manual.create" } = {},
 ): Promise<CreatedBackup> {
   const preflight = getBackupPreflightStatus();
   if (!preflight.ready) {
@@ -667,13 +668,15 @@ export async function createDatabaseBackup(
   const source = Readable.from(encryptedBackupStream(now, key, keyVersion, iv, stats, onChunk));
   const body = Readable.toWeb(source) as ReadableStream<Uint8Array>;
 
-  const uploaded = await put(pathname, body, {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: false,
-    cacheControlMaxAge: 60,
-    contentType: "application/octet-stream",
-    multipart: true,
+  const uploaded = await trackedBlobPut({
+    source: options.operationSource ?? "backups.manual.create",
+    pathname,
+    body,
+    options: { access: "private", addRandomSuffix: false, allowOverwrite: false, cacheControlMaxAge: 60, contentType: "application/octet-stream", multipart: true },
+    category: "CRITICAL",
+    recordAfterSuccess: true,
+    advancedOperations: 3,
+    successCost: () => multipartAdvancedOperationCount(encryptedSize),
   });
 
   // Global backups contain database rows only. Mark packages with document or
@@ -709,12 +712,12 @@ export async function createDatabaseBackup(
     demoExclusion,
   });
   try {
-    await put(`${pathname}${MANIFEST_SUFFIX}`, canonicalJson(manifest), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: false,
-      cacheControlMaxAge: 60,
-      contentType: "application/json",
+    await trackedBlobPut({
+      source: options.operationSource ?? "backups.manual.create",
+      pathname: `${pathname}${MANIFEST_SUFFIX}`,
+      body: canonicalJson(manifest),
+      options: { access: "private", addRandomSuffix: false, allowOverwrite: false, cacheControlMaxAge: 60, contentType: "application/json" },
+      category: "CRITICAL",
     });
   } catch (error) {
     await del(uploaded.pathname).catch(() => undefined);
@@ -794,7 +797,7 @@ async function getOrganizationBackupMetadata(organizationId: string) {
 }
 
 async function rotateOrganizationBackups(organizationId: string) {
-  const entries = await listOrganizationBackups(organizationId);
+  const entries = await listTenantBackupsInPrefix(TENANT_BACKUP_PREFIX, organizationId, "backups.rotation.list", "CRITICAL");
   const selection = selectBackupRetention(entries.map((entry) => ({ ...entry, id: entry.pathname })));
   if (selection.remove.length === 0) return [];
   await del(selection.remove.flatMap((entry) => [entry.pathname, `${entry.pathname}${MANIFEST_SUFFIX}`]));
@@ -804,7 +807,7 @@ async function rotateOrganizationBackups(organizationId: string) {
 export async function createOrganizationDatabaseBackup(
   organizationId: string,
   now = new Date(),
-  options: { target?: BackupTarget; deferRotation?: boolean } = {},
+  options: { target?: BackupTarget; deferRotation?: boolean; operationSource?: "backups.scheduled.create" | "backups.manual.create" } = {},
 ): Promise<CreatedBackup> {
   const preflight = getBackupPreflightStatus();
   if (!preflight.ready) throw new Error(formatBackupPreflightError(preflight));
@@ -836,13 +839,15 @@ export async function createOrganizationDatabaseBackup(
     { organizationId: safeOrganizationId, tableNames: TENANT_EXPORT_TABLES, manifestVersion: TENANT_BACKUP_FORMAT_VERSION },
   ));
   const body = Readable.toWeb(source) as ReadableStream<Uint8Array>;
-  const uploaded = await put(pathname, body, {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: false,
-    cacheControlMaxAge: 60,
-    contentType: "application/octet-stream",
-    multipart: true,
+  const uploaded = await trackedBlobPut({
+    source: options.operationSource ?? "backups.manual.create",
+    pathname,
+    body,
+    options: { access: "private", addRandomSuffix: false, allowOverwrite: false, cacheControlMaxAge: 60, contentType: "application/octet-stream", multipart: true },
+    category: "CRITICAL",
+    recordAfterSuccess: true,
+    advancedOperations: 3,
+    successCost: () => multipartAdvancedOperationCount(encryptedSize),
   });
   const capability = (stats.tables.find((table) => table.name === "Document")?.rowCount ?? 0) === 0
     ? "COMPLETE"
@@ -878,12 +883,12 @@ export async function createOrganizationDatabaseBackup(
     totals: { tables: stats.tables.length, rows: stats.totalRows },
   });
   try {
-    await put(`${pathname}${MANIFEST_SUFFIX}`, canonicalJson(manifest), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: false,
-      cacheControlMaxAge: 60,
-      contentType: "application/json",
+    await trackedBlobPut({
+      source: options.operationSource ?? "backups.manual.create",
+      pathname: `${pathname}${MANIFEST_SUFFIX}`,
+      body: canonicalJson(manifest),
+      options: { access: "private", addRandomSuffix: false, allowOverwrite: false, cacheControlMaxAge: 60, contentType: "application/json" },
+      category: "CRITICAL",
     });
   } catch (error) {
     await del(uploaded.pathname).catch(() => undefined);
@@ -1086,12 +1091,11 @@ export async function rekeyStoredBackup(
   const filename = `policydesk-${compactTimestamp(now)}-${nonce}-kv-${rekeyStatus.targetKeyVersion}${BACKUP_EXTENSION}`;
   assertSafeBackupFilename(filename);
   const pathname = `${BACKUP_REKEY_PREFIX}${filename}`;
-  const uploaded = await put(pathname, encryptedTarget, {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: false,
-    cacheControlMaxAge: 60,
-    contentType: "application/octet-stream",
+  const uploaded = await trackedBlobPut({
+    source: "backups.rekey",
+    pathname,
+    body: encryptedTarget,
+    options: { access: "private", addRandomSuffix: false, allowOverwrite: false, cacheControlMaxAge: 60, contentType: "application/octet-stream" },
   });
   const manifest = createBackupManifest({
     format: source.manifest.format,
@@ -1114,12 +1118,11 @@ export async function rekeyStoredBackup(
     tables: source.manifest.tables,
     totals: source.manifest.totals,
   });
-  await put(`${pathname}${MANIFEST_SUFFIX}`, canonicalJson(manifest), {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: false,
-    cacheControlMaxAge: 60,
-    contentType: "application/json",
+  await trackedBlobPut({
+    source: "backups.rekey",
+    pathname: `${pathname}${MANIFEST_SUFFIX}`,
+    body: canonicalJson(manifest),
+    options: { access: "private", addRandomSuffix: false, allowOverwrite: false, cacheControlMaxAge: 60, contentType: "application/json" },
   });
 
   const verification = await verifyStoredBackup(filename);

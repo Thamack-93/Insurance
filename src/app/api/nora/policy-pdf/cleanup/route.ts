@@ -6,7 +6,7 @@ import { requireOrganizationContext } from "@/lib/organization-context";
 import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { assertSameOrigin, readJsonBody } from "@/lib/request-guards";
 import { isNoraPolicyPdfPathname } from "@/lib/nora-pdf-storage.shared";
-import { cleanupExpiredNoraCaptureHandoffs } from "@/lib/nora-capture-handoff-storage";
+import { markNoraTemporaryBlobDeleted } from "@/lib/nora-temporary-blob-ledger";
 
 export const runtime = "nodejs";
 
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "La referencia temporal no pertenece a tu sesión." }, { status: 403 });
     }
     await del(payload.url);
-    await cleanupExpiredNoraCaptureHandoffs(user.id).catch(() => undefined);
+    await markNoraTemporaryBlobDeleted({ context: organization, userId: user.id, pathname: url.pathname.replace(/^\/+/, "") });
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
