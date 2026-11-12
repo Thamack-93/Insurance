@@ -26,6 +26,14 @@ PolicyDesk contains a real, actively used insurance portfolio. Treat it as produ
 - Prefer additive/backward-compatible migrations and expand/contract deployment. Require human approval for schema or data recovery changes.
 - Never expose real portfolio records, credentials or backup payloads in logs or CI artifacts.
 
+## Restore certification checklist (must be evidenced, not assumed)
+1. Confirm the latest stored encrypted backup and manifest were produced successfully; record creation UTC time, encrypted payload checksum, and key version only (never the key or payload).
+2. Identify an isolated, disposable Neon restore branch with explicit authorization and prove its database endpoint differs from every production/source/pooler endpoint before running any restore.
+3. Run the existing isolated restore drill using the verified stored backup, then inspect its sanitized report for a PASS across manifest validation, decryption, schema/migrations, data and relational integrity, document/blob recovery, and application smoke. Do not substitute a synthetic CI restore for this check.
+4. Record evidence: sanitized report location, backup UTC time, drill UTC time, duration (RTO observed), age of last recoverable backup (RPO observed), and any omitted verification stages. If any required stage is absent, status remains NOT VERIFIED.
+5. For a failed drill: preserve the sanitized failure stage, stop automatic data/schema changes, and fix the cause without touching production. Never execute the drill using production DATABASE_URL as the restore target.
+6. For code backtrack: prepare a Git revert with validated CI and deployment behavior; for data backtrack: require a separately approved recovery plan that explicitly covers writes after the backup and documents/attachments.
+
 ## Automated quality gates
 - Required for every PR: production dependency audit, quality checks (lint, typecheck, unit, security manifest, secrets, auth guards), disposable PostgreSQL application build/API/E2E, and tenant-isolation where applicable. Check exact commit SHA.
 - Add targeted synthetic tests for clients, policies, renewals, receipts/payments, claims, documents and Nora/Telegram side effects when touched.
