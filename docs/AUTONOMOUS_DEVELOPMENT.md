@@ -5,7 +5,7 @@ PolicyDesk contains a real, actively used insurance portfolio. Treat it as produ
 ## Source of truth and continuity
 - GitHub main, PR checks, issues, and deploy status are authoritative. This file is a runbook, not proof of runtime health.
 - Each scheduled run first reads this file, open PRs, recent commits, CI and outstanding issues.
-- Work in progress: CI security manifest fix PR #233. Finish/validate it before starting feature work.
+- CI security manifest route is present on main as of 2026-11-12; PR #233 was validated with four successful CI jobs. Continue the existing runbook PR #234; do not duplicate work. Confirm merge history before reporting PR #233 as merged.
 - Max one active feature PR and one review-blocked PR. Reuse an existing PR; do not duplicate work.
 - After each run, update the NOW/NEXT/LATER roadmap below through a PR when appropriate. Never overwrite concurrent work.
 - Every report must be readable in 30 seconds: status, shipped/PR, tests, portfolio impact, backup/restore evidence, next action, and approval needed.
@@ -34,9 +34,9 @@ PolicyDesk contains a real, actively used insurance portfolio. Treat it as produ
 
 ## Roadmap (update after each completed implementation)
 ### NOW
-1. Validate and finish PR #233; establish safe CI baseline and enforce required checks.
-2. Verify branch protection and whether main triggers automatic deployment; no auto-merge before this is known.
-3. Verify isolated restore drill against a real encrypted backup, with approval and safe target.
+1. Complete runbook PR #234 and establish verified branch protection/rulesets for required checks.
+2. Confirm whether main triggers automatic deployment; keep auto-merge disabled until confirmed.
+3. Verify isolated restore drill against a recent real encrypted backup, with safe temporary target and sanitized evidence; no production restore.
 
 ### NEXT
 1. Focused synthetic regression fixtures for daily portfolio workflows.
