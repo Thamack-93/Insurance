@@ -124,7 +124,18 @@ const policyBaseSchema = z
       const parsed = policyRiskDetailsSchema.safeParse(values.riskDetails);
       if (!parsed.success || parsed.data.policyType !== values.policyType) {
         context.addIssue({ code: "custom", path: ["riskDetails"], message: "Revisa que los datos del riesgo correspondan al ramo seleccionado." });
+      } else if (values.policyType === "AUTO" && parsed.data.policyType === "AUTO") {
+        if (!parsed.data.data.vehicles.length) {
+          context.addIssue({ code: "custom", path: ["riskDetails", "data", "vehicles"], message: "Agrega al menos un vehículo asegurado." });
+        }
+        parsed.data.data.vehicles.forEach((vehicle, index) => {
+          if (!vehicle.unitClass.trim()) {
+            context.addIssue({ code: "custom", path: ["riskDetails", "data", "vehicles", index, "unitClass"], message: "Selecciona el tipo de unidad para cada vehículo." });
+          }
+        });
       }
+    } else if (values.policyType === "AUTO") {
+      context.addIssue({ code: "custom", path: ["riskDetails"], message: "Agrega cada vehículo asegurado y selecciona su tipo de unidad." });
     }
     if (values.bonusEligibilityJson) {
       try {

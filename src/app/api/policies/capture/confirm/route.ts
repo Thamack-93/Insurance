@@ -27,6 +27,8 @@ import {
 
 export const runtime = "nodejs";
 
+class PolicyCaptureValidationError extends Error {}
+
 const confirmSchema = z.object({
   draft: z.object({
     policyNumber: z.string().min(1),
@@ -352,6 +354,12 @@ export async function POST(request: NextRequest) {
         : payload.carryForwardRiskConfirmed && sourceRiskCandidate && hasPolicyRiskData(sourceRiskCandidate)
           ? sourceRiskCandidate
           : null;
+      if (captureDraft.policyType === "AUTO") {
+        const autoRisk = policyRiskDetailsSchema.safeParse(riskDetails);
+        if (!autoRisk.success || autoRisk.data.policyType !== "AUTO" || !autoRisk.data.data.vehicles.length || autoRisk.data.data.vehicles.some((vehicle) => !vehicle.unitClass.trim())) {
+          throw new PolicyCaptureValidationError("Selecciona el tipo de unidad de cada vehículo antes de guardar la póliza.");
+        }
+      }
       const riskSummary = summarizePolicyRiskDetails(riskDetails);
       const notes = buildCaptureNotes(captureDraft, existingTarget?.notes ?? null);
 
@@ -600,6 +608,9 @@ export async function POST(request: NextRequest) {
         : "Póliza capturada y recibos generados.",
     });
   } catch (error) {
+    if (error instanceof PolicyCaptureValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

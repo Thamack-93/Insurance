@@ -21,13 +21,17 @@ import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query"
 import { CommissionImportForm } from "@/components/commissions/commission-import-form";
 import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 import { ExportButtons } from "@/components/reports/export-buttons";
-import { generateCommissionReport } from "./actions";
 import { formatDateInput, parseDateInput } from "@/lib/form-utils";
 import { businessAddDays } from "@/lib/business-dates";
 import { allocatePaidNetPremium, deriveReceiptNetPremium, exceedsReceiptPaymentTolerance, type UnitPremiumBreakdown } from "@/lib/premium-breakdown";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
 import { summarizeCommissionReportRows } from "@/lib/commission-report";
+import { CommissionPeriodFilter } from "@/components/commissions/commission-period-filter";
+import { CommissionUnitClassFix } from "@/components/commissions/commission-unit-class-fix";
+import { businessToday } from "@/lib/business-dates";
+import { getCommissionPeriodRange } from "@/lib/commissions-periods";
+import { policyRiskDetailsSchema, riskDetailsFromExisting } from "@/lib/policy-risk-details";
 
 function parseReportDate(value: string | undefined) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -90,6 +94,9 @@ export default async function CommissionsPage({
   const paidTo = parseReportDate(params.paidTo);
   const validPaidRange = Boolean(paidFrom && paidTo && paidFrom <= paidTo);
   const paidToExclusive = paidTo ? businessAddDays(paidTo, 1) : null;
+  const periodAnchor = formatDateInput(businessToday());
+  const defaultPeriod = getCommissionPeriodRange(periodAnchor, "PREVIOUS_MONTH");
+  const formPeriod = validPaidRange ? { from: params.paidFrom!, to: params.paidTo! } : defaultPeriod;
 
   const openWhere: Prisma.CommissionWhereInput = {
     ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
@@ -149,7 +156,7 @@ export default async function CommissionsPage({
                 policy: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}) },
                 receipt: { organizationId: scope.organizationId },
               },
-              include: { client: true, policy: { include: { insurer: true } }, receipt: { include: { commissions: { where: { organizationId: scope.organizationId } } } } },
+              include: { client: true, policy: { include: { insurer: true, insuredAssets: { select: { description: true, serialNumber: true } }, insuredParties: { select: { fullName: true } } } }, receipt: { include: { commissions: { where: { organizationId: scope.organizationId } } } } },
               orderBy: [{ paidDate: "asc" }, { id: "asc" }],
             });
             const receiptIds = [...new Set(payments.map((payment) => payment.receiptId))];
@@ -324,11 +331,7 @@ export default async function CommissionsPage({
 
         <SectionCard title="Reporte de comisiones por periodo" description="El reporte se vuelve a construir desde pagos y comisiones; PolicyDesk no guarda una copia histórica de la consulta.">
           {scope.membershipRole === "AGENT" ? <p className="border-b px-4 py-3 text-sm text-muted-foreground">Puedes consultar los pagos y comisiones de tu cartera. Solo Owner o Admin puede calcular las comisiones faltantes.</p> : (
-            <form action={generateCommissionReport} className="flex flex-wrap items-end gap-3 border-b px-4 py-4">
-              <label className="grid gap-1 text-sm">Desde<input required type="date" name="paidFrom" defaultValue={params.paidFrom} className="h-10 rounded-md border bg-background px-3" /></label>
-              <label className="grid gap-1 text-sm">Hasta<input required type="date" name="paidTo" defaultValue={params.paidTo} className="h-10 rounded-md border bg-background px-3" /></label>
-              <Button type="submit">Calcular y generar reporte</Button>
-            </form>
+            <CommissionPeriodFilter anchor={periodAnchor} initialFrom={formPeriod.from} initialTo={formPeriod.to} />
           )}
           <details className="border-b px-4 py-3 text-xs text-muted-foreground">
             <summary className="w-fit cursor-pointer font-medium text-foreground">Cómo se calcula</summary>
@@ -368,7 +371,14 @@ export default async function CommissionsPage({
                   <TableHeader><TableRow className="bg-muted/40">
                     <TableHead>Fecha</TableHead><TableHead>Póliza / recibo</TableHead><TableHead>Cliente / aseguradora</TableHead><TableHead className="text-right">Prima pagada / neta</TableHead><TableHead className="text-right">Comisión calculada</TableHead><TableHead>Estado y motivo</TableHead>
                   </TableRow></TableHeader>
-                  <TableBody>{reportRows.map(({ payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status, reasonList }) => <TableRow key={payment.id}>
+                  <TableBody>{reportRows.map(({ payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status, reasonList }) => {
+                    const riskDetails = policyRiskDetailsSchema.safeParse(riskDetailsFromExisting(payment.policy.policyType, payment.policy.riskDetails, payment.policy.insuredObject, payment.policy.insuredAssets, payment.policy.insuredParties, payment.policy.beneficiaryInfo));
+                    const fixableVehicles = status === "REVIEW"
+                      && reasonList.some((reason) => reason.includes("Clasifica la unidad"))
+                      && riskDetails.success && riskDetails.data.policyType === "AUTO"
+                      ? riskDetails.data.data.vehicles.flatMap((vehicle, index) => vehicle.unitClass.trim() ? [] : [{ index, description: [vehicle.make, vehicle.model, vehicle.year, vehicle.version].filter(Boolean).join(" ") }])
+                      : [];
+                    return <TableRow key={payment.id}>
                     <TableCell className="whitespace-nowrap">{formatDate(payment.paidDate)}</TableCell>
                     <TableCell><Link href={`/policies/${payment.policyId}`} className="font-medium hover:text-primary">{payment.policy.policyNumber}</Link><p className="text-xs text-muted-foreground">{receipt.receiptNumber}</p></TableCell>
                     <TableCell className="min-w-48">{payment.client.fullName}<p className="text-xs text-muted-foreground">{payment.policy.insurer.name}</p></TableCell>
@@ -381,11 +391,13 @@ export default async function CommissionsPage({
                       <summary className="inline-flex cursor-pointer list-none items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950">
                         Pendiente{reasonList.length > 1 ? ` · ${reasonList.length} motivos` : " · Ver motivo"}
                       </summary>
-                      <div className="mt-2 max-w-[230px] space-y-1.5 whitespace-normal rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                      <div className="mt-2 max-w-[420px] space-y-1.5 whitespace-normal rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
                         {reasonList.map((item, index) => <p key={`${payment.id}-reason-${index}`}>{item}</p>)}
+                        {scope.membershipRole !== "AGENT" && fixableVehicles.length ? <CommissionUnitClassFix policyId={payment.policyId} receiptId={receipt.id} vehicles={fixableVehicles} /> : null}
                       </div>
                     </details>}</TableCell>
-                  </TableRow>)}</TableBody>
+                    </TableRow>;
+                  })}</TableBody>
                 </Table>
               </div> : <p className="px-4 py-8 text-center text-sm text-muted-foreground">No hay pagos de prima POSTED dentro de ese periodo.</p>}
             </>
