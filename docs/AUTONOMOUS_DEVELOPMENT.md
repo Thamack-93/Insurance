@@ -5,7 +5,7 @@ PolicyDesk contains a real, actively used insurance portfolio. Treat it as produ
 ## Source of truth and continuity
 - GitHub main, PR checks, issues, and deploy status are authoritative. This file is a runbook, not proof of runtime health.
 - Each scheduled run first reads this file, open PRs, recent commits, CI and outstanding issues.
-- CI security manifest route is present on main as of 2026-11-12; PR #233 was validated with four successful CI jobs. Continue the existing runbook PR #234; do not duplicate work. Confirm merge history before reporting PR #233 as merged.
+- PR #233 was merged into main by commit d789308cd2093c346210e93c433c292d9cf1072d on 2026-11-11, after four successful PR CI jobs. Continue PR #234; do not duplicate work. The latest independently observed main commit on 2026-11-12 is 0c493c14baeb38a4cf96fe9b973e98abfee8c70c (commission classes). Recheck on every run.
 - Max one active feature PR and one review-blocked PR. Reuse an existing PR; do not duplicate work.
 - After each run, update the NOW/NEXT/LATER roadmap below through a PR when appropriate. Never overwrite concurrent work.
 - Every report must be readable in 30 seconds: status, shipped/PR, tests, portfolio impact, backup/restore evidence, next action, and approval needed.
@@ -34,6 +34,12 @@ PolicyDesk contains a real, actively used insurance portfolio. Treat it as produ
 5. For a failed drill: preserve the sanitized failure stage, stop automatic data/schema changes, and fix the cause without touching production. Never execute the drill using production DATABASE_URL as the restore target.
 6. For code backtrack: prepare a Git revert with validated CI and deployment behavior; for data backtrack: require a separately approved recovery plan that explicitly covers writes after the backup and documents/attachments.
 
+## Evidence ledger (update only from verified facts)
+- 2026-11-11: PR #233 CI success on b16d87b0edcda3018efd895a363e3aa26cf8d351 (application, quality, tenant-isolation, production-dependency-audit); merged as d789308cd2093c346210e93c433c292d9cf1072d.
+- 2026-11-12: main observed at 0c493c14baeb38a4cf96fe9b973e98abfee8c70c; no deployment or branch protection certification established by this observation.
+- 2026-11-12: PR #234 remains open. Its exact-head CI status is NOT VERIFIED in this run; do not infer success from earlier commits.
+- 2026-11-12: latest real encrypted backup timestamp, restore PASS, RPO and RTO are NOT VERIFIED. Synthetic PostgreSQL restore tests are not sufficient.
+
 ## Automated quality gates
 - Required for every PR: production dependency audit, quality checks (lint, typecheck, unit, security manifest, secrets, auth guards), disposable PostgreSQL application build/API/E2E, and tenant-isolation where applicable. Check exact commit SHA.
 - Add targeted synthetic tests for clients, policies, renewals, receipts/payments, claims, documents and Nora/Telegram side effects when touched.
@@ -42,9 +48,9 @@ PolicyDesk contains a real, actively used insurance portfolio. Treat it as produ
 
 ## Roadmap (update after each completed implementation)
 ### NOW
-1. Complete runbook PR #234 and establish verified branch protection/rulesets for required checks.
+1. Finish runbook PR #234: validate its exact head SHA CI, review and merge only after GitHub protection/deployment behavior is confirmed. PR #233 is already merged; do not reopen it.
 2. Confirm whether main triggers automatic deployment; keep auto-merge disabled until confirmed.
-3. Verify isolated restore drill against a recent real encrypted backup, with safe temporary target and sanitized evidence; no production restore.
+3. Verify isolated restore drill against a recent real encrypted backup, with safe temporary target and sanitized evidence; no production restore. As of 2026-11-12 17:00 Mexico City, no actual restore PASS, backup timestamp, RPO or RTO evidence has been confirmed in this autonomous run.
 
 ### NEXT
 1. Focused synthetic regression fixtures for daily portfolio workflows.
