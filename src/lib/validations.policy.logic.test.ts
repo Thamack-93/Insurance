@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { policyInsuredObjectForSave, summarizePolicyRiskDetails } from "@/lib/policy-risk-details";
 import {
   policySchema,
   policyUpdateSchemaForOriginalTerm,
@@ -140,5 +141,42 @@ describe("financing premium validation", () => {
     expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(
       policy({ premiumDiscountAmount: -1 }),
     ).success).toBe(false);
+  });
+});
+
+describe("multi-vehicle insured-object preservation", () => {
+  it("summarizes both vehicles instead of silently dropping the second insured asset", () => {
+    const riskDetails = policy({
+      endDate: "2026-10-10",
+      riskDetails: {
+        version: 1,
+        policyType: "AUTO",
+        commissionUnitClass: "",
+        data: {
+          vehicles: [
+            { make: "Honda", model: "Civic", year: "2024", version: "", vin: "VIN-1", plates: "AAA-111", unitClass: "AUTO_PARTICULAR" },
+            { make: "Ford", model: "Ranger", year: "2023", version: "", vin: "VIN-2", plates: "BBB-222", unitClass: "CAMION_CARGA" },
+          ],
+        },
+      },
+    }).riskDetails;
+    expect(policySchema.safeParse(policy({ endDate: "2026-10-10", riskDetails })).success).toBe(true);
+    const summary = summarizePolicyRiskDetails(riskDetails);
+    expect(summary).toContain("Honda Civic 2024");
+    expect(summary).toContain("Ford Ranger 2023");
+    expect(summary).toContain("VIN-1");
+    expect(summary).toContain("VIN-2");
+    expect(policyInsuredObjectForSave(riskDetails, "Historical text")).toBe(summary);
+  });
+
+  it("retains the original free-text description when structured vehicle fields are empty", () => {
+    const emptyRisk = {
+      version: 1 as const,
+      policyType: "AUTO" as const,
+      commissionUnitClass: "",
+      data: { vehicles: [{ make: "", model: "", year: "", version: "", vin: "", plates: "", unitClass: "" }] },
+    };
+    expect(policyInsuredObjectForSave(emptyRisk, "Legacy vehicle description")).toBe("Legacy vehicle description");
+    expect(policyInsuredObjectForSave({ ...emptyRisk, sourceText: "Captured original text" }, "Legacy vehicle description")).toBe("Captured original text");
   });
 });
