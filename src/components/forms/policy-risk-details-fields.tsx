@@ -5,11 +5,13 @@ import { Input } from "@/components/ui/input";
 import { FormField, FormGrid, FormSection } from "@/components/forms/form-primitives";
 import type { PolicyType } from "@/lib/domain-values";
 import { emptyPolicyRiskDetails, summarizePolicyRiskDetails, type PolicyRiskDetails } from "@/lib/policy-risk-details";
+import { VEHICLE_UNIT_CLASS_OPTIONS } from "@/lib/vehicle-unit-classes";
 
 type Props = {
   policyType: PolicyType;
   value: unknown;
   onChange: (value: PolicyRiskDetails) => void;
+  requireAutoVehicleUnitClass?: boolean;
 };
 
 type Item = Record<string, string>;
@@ -48,21 +50,12 @@ const repeatedByType: Partial<Record<PolicyType, string[]>> = {
   ACCIDENTES: ["insuredPeople"], OTRO: ["attributes"],
 };
 
-const vehicleClassOptions = [
-  ["AUTO_PARTICULAR", "Auto particular"],
-  ["CAMION_CARGA", "Camión / carga"],
-  ["TRACTOCAMION", "Tractocamión"],
-  ["MOTOCICLETA", "Motocicleta"],
-  ["AUTOBUS", "Autobús"],
-  ["OTRO", "Otro"],
-] as const;
-
 function asRiskValue(value: unknown, policyType: PolicyType): RiskValue {
   if (value && typeof value === "object" && "data" in value && "policyType" in value) return value as RiskValue;
   return emptyPolicyRiskDetails(policyType) as RiskValue;
 }
 
-export function PolicyRiskDetailsFields({ policyType, value, onChange }: Props) {
+export function PolicyRiskDetailsFields({ policyType, value, onChange, requireAutoVehicleUnitClass = true }: Props) {
   const riskValue = asRiskValue(value, policyType);
   const data = riskValue.policyType === policyType ? riskValue.data : (emptyPolicyRiskDetails(policyType) as RiskValue).data;
   const collections = repeatedByType[policyType] ?? [];
@@ -110,12 +103,13 @@ export function PolicyRiskDetailsFields({ policyType, value, onChange }: Props) 
                     const inputId = `risk-${policyType}-${key}-${index}-${field}`;
                     if (key === "vehicles" && field === "unitClass") {
                       const currentValue = items[index]?.[field] ?? "";
-                      const knownValue = vehicleClassOptions.some(([value]) => value === currentValue);
-                      return <FormField key={field} label={label} htmlFor={inputId}>
-                        <select id={inputId} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={currentValue} onChange={(event) => changeItem(key, index, field, event.target.value)}>
+                      const knownValue = VEHICLE_UNIT_CLASS_OPTIONS.some(([value]) => value === currentValue);
+                      const isRequired = policyType === "AUTO" && requireAutoVehicleUnitClass;
+                      return <FormField key={field} label={label} htmlFor={inputId} required={isRequired} hint={isRequired ? "Se captura una vez y se usa para calcular comisiones." : undefined}>
+                        <select id={inputId} required={isRequired} aria-required={isRequired} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={currentValue} onChange={(event) => changeItem(key, index, field, event.target.value)}>
                           <option value="">Selecciona tipo de unidad</option>
                           {!knownValue && currentValue ? <option value={currentValue}>Valor anterior: {currentValue}</option> : null}
-                          {vehicleClassOptions.map(([value, optionLabel]) => <option key={value} value={value}>{optionLabel}</option>)}
+                          {VEHICLE_UNIT_CLASS_OPTIONS.map(([value, optionLabel]) => <option key={value} value={value}>{optionLabel}</option>)}
                         </select>
                       </FormField>;
                     }

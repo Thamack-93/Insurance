@@ -143,10 +143,27 @@ function policyTermWithinLimit(startDate: string, endDate: string) {
 
 const policyTermError = "La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.";
 
-export const policySchema = policyBaseSchema.refine(
-  (values) => policyTermWithinLimit(values.startDate, values.endDate),
-  { message: policyTermError, path: ["endDate"] },
-);
+export const policySchema = policyBaseSchema
+  .refine(
+    (values) => policyTermWithinLimit(values.startDate, values.endDate),
+    { message: policyTermError, path: ["endDate"] },
+  )
+  .superRefine((values, context) => {
+    if (values.policyType !== "AUTO") return;
+    const parsed = policyRiskDetailsSchema.safeParse(values.riskDetails);
+    if (!parsed.success || parsed.data.policyType !== "AUTO") {
+      context.addIssue({ code: "custom", path: ["riskDetails"], message: "Agrega cada vehículo asegurado y selecciona su tipo de unidad." });
+      return;
+    }
+    if (!parsed.data.data.vehicles.length) {
+      context.addIssue({ code: "custom", path: ["riskDetails", "data", "vehicles"], message: "Agrega al menos un vehículo asegurado." });
+    }
+    parsed.data.data.vehicles.forEach((vehicle, index) => {
+      if (!vehicle.unitClass.trim()) {
+        context.addIssue({ code: "custom", path: ["riskDetails", "data", "vehicles", index, "unitClass"], message: "Selecciona el tipo de unidad para cada vehículo." });
+      }
+    });
+  });
 
 export const policyUpdateSchema = policyBaseSchema;
 

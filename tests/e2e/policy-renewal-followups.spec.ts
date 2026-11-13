@@ -57,6 +57,7 @@ test("creating a linked renewal closes both source follow-ups in the policy tran
     await authenticatePageAsAdmin(page);
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
     await selectBonusSeller(page);
+    await page.locator("#risk-AUTO-vehicles-0-unitClass").selectOption("AUTO_PARTICULAR");
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
     await expect(page.getByRole("heading", { name: "Revisar renovación antes de guardar" })).toBeVisible();
     await expect(page.getByText("Póliza de origen:", { exact: false })).toContainText(fixture.policyNumber);
@@ -146,6 +147,7 @@ test("a failed follow-up close rolls back linked policy creation and source rene
     await authenticatePageAsAdmin(page);
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
     await selectBonusSeller(page);
+    await page.locator("#risk-AUTO-vehicles-0-unitClass").selectOption("AUTO_PARTICULAR");
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
     await expect(page.getByRole("heading", { name: "Revisar renovación antes de guardar" })).toBeVisible();
     const reviewConfirmation = page.getByRole("checkbox", { name: /Confirmo que revisé la póliza de origen/ });

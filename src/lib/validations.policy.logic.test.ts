@@ -24,6 +24,7 @@ function policy(overrides: Partial<PolicyFormValues> = {}): PolicyFormValues {
     paymentFrequency: "ANNUAL",
     paymentPlan: "",
     insuredObject: "Synthetic vehicle",
+    riskDetails: { version: 1, policyType: "AUTO", commissionUnitClass: "", data: { vehicles: [{ make: "Honda", model: "Civic", year: "2024", version: "", vin: "VIN-1", plates: "", unitClass: "AUTO_PARTICULAR" }] } },
     beneficiaryInfo: "",
     notes: "",
     renewedFromPolicyId: "",
@@ -52,6 +53,24 @@ describe("policy term validation", () => {
     const next = { startDate: "2025-10-10", endDate: "2026-10-10" };
     expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(policy(next)).success).toBe(true);
     expect(policyUpdateTermIsValid(historicalTerm, next)).toBe(true);
+  });
+});
+
+describe("AUTO policy class validation", () => {
+  it("requires each vehicle to have a unit class", () => {
+    const value = policy({ riskDetails: { version: 1, policyType: "AUTO", commissionUnitClass: "", data: { vehicles: [{ make: "Honda", model: "Civic", year: "2024", version: "", vin: "VIN-1", plates: "", unitClass: "" }] } } });
+    expect(policySchema.safeParse(value).success).toBe(false);
+    expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(value).success).toBe(true);
+  });
+
+  it("requires at least one vehicle and accepts fully classified multi-vehicle policies", () => {
+    const noVehicles = policy({ riskDetails: { version: 1, policyType: "AUTO", commissionUnitClass: "", data: { vehicles: [] } } });
+    const twoVehicles = policy({ endDate: "2026-10-10", riskDetails: { version: 1, policyType: "AUTO", commissionUnitClass: "", data: { vehicles: [
+      { make: "Honda", model: "Civic", year: "2024", version: "", vin: "VIN-1", plates: "", unitClass: "AUTO_PARTICULAR" },
+      { make: "Ford", model: "Ranger", year: "2024", version: "", vin: "VIN-2", plates: "", unitClass: "CAMION_CARGA" },
+    ] } } });
+    expect(policySchema.safeParse(noVehicles).success).toBe(false);
+    expect(policySchema.safeParse(twoVehicles).success).toBe(true);
   });
 });
 

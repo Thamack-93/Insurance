@@ -400,7 +400,7 @@ export function PolicyForm({
             name="riskDetails"
             control={control}
             render={({ field }) => (
-              <PolicyRiskDetailsFields policyType={selectedPolicyType} value={field.value} onChange={field.onChange} />
+              <PolicyRiskDetailsFields policyType={selectedPolicyType} value={field.value} onChange={field.onChange} requireAutoVehicleUnitClass={!originalTerm} />
             )}
           />
 

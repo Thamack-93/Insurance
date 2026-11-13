@@ -233,7 +233,7 @@ test.describe("structured policy risk details", () => {
         version: 1,
         policyType: "AUTO",
         sourceText: "Toyota, Corolla, 2020, LE",
-        data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin, plates: "ABC-123" }] },
+        data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin, plates: "ABC-123", unitClass: "AUTO_PARTICULAR" }] },
       };
       await db.policy.update({ where: { id: fixture.policyId }, data: { riskDetails, insuredObject: "Toyota Corolla 2020 LE Placas ABC-123 Serie 2T1BURHE0LC123456" } });
       const draft = {
