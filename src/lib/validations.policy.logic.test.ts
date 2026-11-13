@@ -63,6 +63,24 @@ describe("AUTO policy class validation", () => {
     expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(value).success).toBe(true);
   });
 
+  it("rejects an unclassified second vehicle without losing the exact error location", () => {
+    const value = policy({ endDate: "2026-10-10", riskDetails: {
+      version: 1, policyType: "AUTO", commissionUnitClass: "", data: { vehicles: [
+        { make: "Honda", model: "Civic", year: "2024", version: "", vin: "VIN-1", plates: "", unitClass: "AUTO_PARTICULAR" },
+        { make: "Ford", model: "Ranger", year: "2024", version: "", vin: "VIN-2", plates: "", unitClass: "" },
+      ] },
+    } });
+    const parsed = policySchema.safeParse(value);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((issue) =>
+        issue.path.join(".") === "riskDetails.data.vehicles.1.unitClass",
+      )).toBe(true);
+    }
+    // Existing policies must remain editable without a forced historical data migration.
+    expect(policyUpdateSchemaForOriginalTerm(historicalTerm).safeParse(value).success).toBe(true);
+  });
+
   it("requires at least one vehicle and accepts fully classified multi-vehicle policies", () => {
     const noVehicles = policy({ riskDetails: { version: 1, policyType: "AUTO", commissionUnitClass: "", data: { vehicles: [] } } });
     const twoVehicles = policy({ endDate: "2026-10-10", riskDetails: { version: 1, policyType: "AUTO", commissionUnitClass: "", data: { vehicles: [
