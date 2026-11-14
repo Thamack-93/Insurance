@@ -213,6 +213,8 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
 
         <ClaimRequirementsSection
           claimId={claim.id}
+          claimFolio={claim.folio}
+          clientName={claim.client.fullName}
           claimStatus={claim.status}
           items={claim.checklistItems.map((item) => ({
             id: item.id,
