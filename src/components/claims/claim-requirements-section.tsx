@@ -33,7 +33,7 @@ function stateDate(item: Requirement) {
   return null;
 }
 
-export function ClaimRequirementsSection({ claimId, claimStatus, items, documents }: { claimId: string; claimStatus: string; items: Requirement[]; documents: ClaimDocument[] }) {
+export function ClaimRequirementsSection({ claimId, claimFolio, clientName, claimStatus, items, documents }: { claimId: string; claimFolio: string; clientName: string; claimStatus: string; items: Requirement[]; documents: ClaimDocument[] }) {
   const [label, setLabel] = useState("");
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [requestPhone, setRequestPhone] = useState("");
@@ -87,7 +87,7 @@ export function ClaimRequirementsSection({ claimId, claimStatus, items, document
             <h3 className="text-sm font-semibold">Solicitar documentos pendientes</h3>
             <p className="text-xs text-muted-foreground">Prepara y revisa el mensaje. No se envía automáticamente.</p>
           </div>
-          <Button type="button" variant="outline" disabled={!pendingCount} onClick={() => setRequestMessage(formatClaimDocumentRequest({ clientName: "", claimReference: claimId, outstandingDocuments: items.filter((item) => isClaimChecklistPending(item.status)).map((item) => item.label) }))}>
+          <Button type="button" variant="outline" disabled={!pendingCount} onClick={() => setRequestMessage(formatClaimDocumentRequest({ clientName, claimReference: claimFolio, outstandingDocuments: items.filter((item) => isClaimChecklistPending(item.status)).map((item) => item.label) }))}>
             Preparar mensaje
           </Button>
           {requestMessage !== null ? (
