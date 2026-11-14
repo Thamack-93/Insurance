@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { formatDate } from "@/lib/dates";
 import { CLAIM_CHECKLIST_STATUSES, CLAIM_CHECKLIST_STATUS_LABELS, isClaimChecklistPending, type ClaimChecklistStatusValue } from "@/lib/claim-checklist-values";
+import { formatClaimDocumentRequest, manualClaimWhatsAppLink } from "@/lib/claim-document-request";
 import { createClaimRequirement, deleteClaimRequirement, setClaimRequirementDocument, updateClaimRequirementStatus } from "@/app/(dashboard)/claims/actions";
 
 type Requirement = {
@@ -34,6 +35,8 @@ function stateDate(item: Requirement) {
 
 export function ClaimRequirementsSection({ claimId, claimStatus, items, documents }: { claimId: string; claimStatus: string; items: Requirement[]; documents: ClaimDocument[] }) {
   const [label, setLabel] = useState("");
+  const [requestMessage, setRequestMessage] = useState<string | null>(null);
+  const [requestPhone, setRequestPhone] = useState("");
   const [pending, startTransition] = useTransition();
   const terminal = claimStatus === "RESOLVED" || claimStatus === "CANCELLED";
   const pendingCount = items.filter((item) => isClaimChecklistPending(item.status)).length;
@@ -79,6 +82,32 @@ export function ClaimRequirementsSection({ claimId, claimStatus, items, document
             })}
           </div>
         )}
+        <div className="space-y-3 rounded-lg border p-3" aria-label="Solicitud manual de documentos">
+          <div>
+            <h3 className="text-sm font-semibold">Solicitar documentos pendientes</h3>
+            <p className="text-xs text-muted-foreground">Prepara y revisa el mensaje. No se envía automáticamente.</p>
+          </div>
+          <Button type="button" variant="outline" disabled={!pendingCount} onClick={() => setRequestMessage(formatClaimDocumentRequest({ clientName: "", claimReference: claimId, outstandingDocuments: items.filter((item) => isClaimChecklistPending(item.status)).map((item) => item.label) }))}>
+            Preparar mensaje
+          </Button>
+          {requestMessage !== null ? (
+            <div className="space-y-2">
+              <label htmlFor="claim-document-message" className="block text-sm font-medium">Mensaje editable</label>
+              <textarea id="claim-document-message" rows={7} maxLength={4000} className="w-full rounded-md border bg-background p-3 text-sm" value={requestMessage} onChange={(event) => setRequestMessage(event.target.value)} />
+              <label htmlFor="claim-document-phone" className="block text-sm font-medium">Teléfono con código de país (para WhatsApp)</label>
+              <Input id="claim-document-phone" type="tel" autoComplete="off" placeholder="+52 55 1234 5678" value={requestPhone} onChange={(event) => setRequestPhone(event.target.value)} />
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" disabled={!requestMessage.trim()} onClick={async () => {
+                  try { await navigator.clipboard.writeText(requestMessage); toast.success("Mensaje copiado"); }
+                  catch { toast.error("No se pudo copiar. Selecciona el texto manualmente."); }
+                }}>Copiar mensaje</Button>
+                {manualClaimWhatsAppLink(requestPhone, requestMessage) ? (
+                  <Button asChild type="button" variant="outline"><a href={manualClaimWhatsAppLink(requestPhone, requestMessage) ?? "#"} target="_blank" rel="noopener noreferrer">Abrir WhatsApp (sin enviar)</a></Button>
+                ) : <span className="self-center text-xs text-muted-foreground">Ingresa un teléfono válido para abrir WhatsApp.</span>}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
     </SectionCard>
   );
